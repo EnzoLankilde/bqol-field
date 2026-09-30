@@ -1,0 +1,71 @@
+/* BQOL Field - only what the platform's two stylesheets do not already give.
+   css/styles.css and css/bqol-service.css are copied in at build time and are
+   never edited here. */
+
+/* Barlow, served from the app itself: the Industry sheet's Google Fonts import
+   cannot load offline, and a field app is offline by definition. */
+@font-face { font-family: "Barlow"; src: url("fonts/Barlow-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/Barlow-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Barlow Condensed"; src: url("fonts/BarlowCondensed-SemiBold.ttf") format("truetype"); font-weight: 600; font-style: normal; font-display: swap; }
+
+html { -webkit-text-size-adjust: 100%; }
+body { overflow-x: hidden; padding-bottom: env(safe-area-inset-bottom); }
+.nav { padding-top: env(safe-area-inset-top); }
+.nav-brand { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 18px; }
+.nav .nav-links a { font-size: 16px; padding: 10px 4px; }
+
+/* Touch targets: a gloved thumb on a tablet, not a mouse. 16px text stops
+   Safari zooming the page each time a field takes focus. */
+.input, select.input, textarea.input { font-size: 16px; min-height: 44px; box-sizing: border-box; max-width: 100%; }
+textarea.input { min-height: 120px; }
+.btn { min-height: 44px; }
+input[type="date"].input { -webkit-appearance: none; appearance: none; }
+input[type="file"].input { padding: 10px; }
+
+.field-check { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.field-check input { width: 24px; height: 24px; margin: 0; flex: none; }
+.field-subhead { margin-top: var(--space-6); margin-bottom: var(--space-4); }
+.field-search .input { width: 100%; }
+
+.field-review td:first-child { min-width: 38%; }
+.field-review select.input { min-width: 88px; }
+.field-review .input { width: 100%; }
+
+.field-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.field-actions .error { flex-basis: 100%; text-align: right; }
+.field-danger { background: var(--u-overdue-bg); border-color: var(--u-overdue-bg); }
+.field-units td:last-child, .field-reports td:last-child { text-align: right; }
+
+.field-flash { border: 1px solid var(--color-text); padding: var(--space-3); margin-bottom: var(--space-6); font-size: 14px; }
+.field-banner { font-size: 14px; }
+.field-empty { border: 1px solid var(--color-divider); padding: var(--space-6); }
+
+.field-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-6); margin: 0; }
+.field-facts dt { font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-700); align-self: center; }
+.field-facts dd { margin: 0; }
+
+/* The finished view. The platform's report sheet is a fixed 210mm, wider than
+   an iPad held upright; on screen it shrinks to fit, on paper it is A4. */
+.field-finished { background: var(--color-surface); min-height: 100vh; padding: 0 16px; }
+.field-finished .report-bar { flex-wrap: wrap; padding: 16px 0; }
+.field-bar-notes { max-width: 210mm; margin: 0 auto; }
+.field-finished .report-sheet { width: auto; max-width: 210mm; }
+.report-sheet.field-sheet { page: field-sheet; }
+
+@media (max-width: 720px) {
+    .field-finished .report-sheet { padding: 8mm; min-height: 0; }
+    .field-finished .report-info { grid-template-columns: 1fr 1fr; }
+    .field-finished .report-info div:nth-child(3n) { border-right: 1px solid #e1e3ea; }
+    .field-actions { justify-content: flex-start; }
+    .field-actions .error { text-align: left; }
+    .field-units td:last-child, .field-reports td:last-child { text-align: left; }
+}
+
+@page field-sheet { size: A4; margin: 12mm; }
+
+@media print {
+    .nav, .report-bar, .field-bar-notes, .shell { display: none !important; }
+    body, .field-finished { background: #fff; padding: 0; min-height: 0; }
+    .field-finished .report-sheet { width: auto; max-width: none; margin: 0; padding: 0; box-shadow: none; min-height: 0; }
+}

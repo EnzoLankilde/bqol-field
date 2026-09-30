@@ -1,0 +1,10 @@
+{
+    "name": "BQOL Field",
+    "short_name": "BQOL Field",
+    "description": "Offline service reports for BQOL units.",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#010841"
+}

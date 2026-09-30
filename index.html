@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="BQOL Field">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#010841">
+    <title>BQOL Field</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/bqol-service.css">
+    <link rel="stylesheet" href="field.css">
+    <style>html, body { margin: 0; }</style>
+</head>
+<body>
+<header class="nav">
+    <div class="nav-inner row">
+        <a class="nav-brand" href="#units">BQOL Field</a>
+        <nav class="nav-links row" aria-label="Main">
+            <a href="#units" data-nav="units">Units</a>
+            <a href="#reports" data-nav="reports">Reports</a>
+            <a href="#pack" data-nav="pack">Pack</a>
+        </nav>
+    </div>
+</header>
+
+<div id="app" aria-live="polite">
+    <main class="shell">
+        <p class="hint">Loading…</p>
+        <noscript><p>BQOL Field needs JavaScript switched on.</p></noscript>
+    </main>
+</div>
+
+<script src="app.js"></script>
+<script>
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(function () {});
+    }
+</script>
+</body>
+</html>

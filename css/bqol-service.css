@@ -1,0 +1,536 @@
+/* ============================================================================
+   BQOL Service Platform — extensions on top of the Industry design system.
+   Load order: styles.css + _ds_bundle.js (design system), then this file.
+   This file only adds what Industry has no component for: urgency badges,
+   the fleet/schedule/history/cycle layouts. Colours, type, spacing, radius,
+   buttons, cards, tables, forms and nav all come from Industry's own classes
+   and var(--*) tokens — nothing here redefines them.
+   ========================================================================= */
+
+/* --- urgency ramp — the one domain colour system Industry has no token for.
+   Ordered by lightness as well as hue so the four states stay distinct
+   under protanopia / deuteranopia: overdue is darkest, plan is steel. */
+:root {
+  --u-overdue-fg: #ffffff;
+  --u-overdue-bg: #7d2b1e;
+  --u-overdue-line: #7d2b1e;
+  --u-overdue-tint: #f6e4e0;
+
+  --u-alarm-fg: #8a3d05;
+  --u-alarm-bg: #f6ddc4;
+  --u-alarm-line: #b8600f;
+
+  --u-warning-fg: #6c5406;
+  --u-warning-bg: #f2eac7;
+  --u-warning-line: #a08313;
+
+  --u-plan-fg: var(--color-accent-800);
+  --u-plan-line: var(--color-neutral-400);
+
+  --space-12: 41px;
+  --row-h: 44px;
+  --shell-max: 1440px;
+}
+
+body { text-wrap: pretty; }
+
+/* --- layout shell -------------------------------------------------------- */
+
+.shell { max-width: var(--shell-max); margin: 0 auto; padding: var(--space-8) var(--space-8) var(--space-12); }
+
+.page-head {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: var(--space-4); padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-text); margin-bottom: var(--space-6);
+}
+.page-head .label { margin-bottom: var(--space-1); }
+
+.cols { display: grid; gap: var(--space-6); }
+.cols-2 { grid-template-columns: 1fr 1fr; }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.cols-main { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
+.stack { display: flex; flex-direction: column; gap: var(--space-6); }
+.stack-tight { display: flex; flex-direction: column; gap: var(--space-2); }
+.row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+
+.label {
+  font-family: var(--font-heading); font-size: 11px; font-weight: var(--font-heading-weight);
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-700);
+}
+.mono { font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace; font-size: 13px; letter-spacing: -0.01em; }
+.muted { color: var(--color-neutral-600); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* --- nav — Industry's .nav/.nav-brand, extended with a right-hand cluster */
+
+.nav { background: var(--color-accent-900); color: #f2f2f3; }
+.nav-inner { max-width: var(--shell-max); margin: 0 auto; padding: var(--space-3) var(--space-8); width: 100%; }
+.nav-brand { color: #fff; margin-right: var(--space-8); }
+.nav-brand small { font-family: var(--font-body); font-weight: 400; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-300); margin-left: var(--space-2); }
+.nav a, .nav-link { color: var(--color-accent-300); }
+.nav a:hover, .nav-link:hover { color: #fff; }
+.nav a[aria-current="page"], .nav-link[aria-current="page"] { color: #fff; }
+.nav-link { background: none; border: 0; font: inherit; cursor: pointer; padding: 0; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
+.nav-user { font-size: 13px; color: var(--color-accent-300); }
+.nav .btn-secondary { border-color: var(--color-accent-300); color: var(--color-accent-300); }
+.nav .btn-secondary:hover { background: color-mix(in srgb, #fff 10%, transparent); color: #fff; }
+/* The nav's search box (Phase 3e): one field, Enter searches, no JavaScript. */
+.nav-search { margin: 0; }
+.nav-search-input { width: 230px; font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--color-accent-300); background: color-mix(in srgb, #fff 8%, transparent); color: #fff; }
+.nav-search-input::placeholder { color: var(--color-accent-300); }
+.nav-search-input:focus { outline: none; border-color: #fff; background: color-mix(in srgb, #fff 14%, transparent); }
+@media (max-width: 720px) { .nav-search, .nav-search-input { width: 100%; } }
+.search-heading { font-size: 17px; margin: var(--space-6) 0 var(--space-2); }
+.search-block { margin-bottom: var(--space-4); }
+.search-list { margin: 0; padding-left: 18px; }
+.search-list li { margin-bottom: 4px; }
+
+/* --- urgency badge — colour + fill treatment + dot + spelled-out word,
+   so the state survives greyscale printing and colour-vision deficiency. */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-heading); font-size: 11px; font-weight: var(--font-heading-weight);
+  letter-spacing: 0.09em; text-transform: uppercase;
+  padding: 2px var(--space-2) 2px 6px; border: 1px solid transparent; white-space: nowrap;
+}
+.badge::before { content: ""; width: 7px; height: 7px; border: 1.5px solid currentColor; background: currentColor; flex: none; }
+.badge-overdue { background: var(--u-overdue-bg); color: var(--u-overdue-fg); border-color: var(--u-overdue-bg); }
+.badge-alarm   { background: var(--u-alarm-bg); color: var(--u-alarm-fg); border-color: var(--u-alarm-line); }
+.badge-warning { background: var(--u-warning-bg); color: var(--u-warning-fg); border-color: var(--u-warning-line); }
+.badge-warning::before { background: transparent; }
+.badge-plan    { background: transparent; color: var(--u-plan-fg); border-color: var(--u-plan-line); }
+.badge-plan::before { background: transparent; border-style: dotted; }
+.badge-neutral { background: var(--color-neutral-200); color: var(--color-neutral-800); border-color: var(--color-neutral-300); }
+.badge-neutral::before { display: none; }
+td[data-th="Status"].mono { color: var(--u-alarm-fg); font-weight: 600; }
+td[data-th="Status"].mono.muted { color: var(--color-neutral-600); font-weight: 400; }
+/* A deviation just closed, with its undo (Phase 3f). */
+.undo-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 10px 12px 10px 16px; margin: 0 0 var(--space-4); background: var(--color-accent-900); color: #fff; }
+.undo-line form { margin: 0; }
+.undo-line .btn-secondary { border-color: var(--color-accent-300); color: #fff; background: none; }
+
+/* --- booking badges — how agreed a visit is, which is not how urgent it is.
+   A deliberately different colour family from the urgency ramp: green is not
+   "less late", it is "the customer said yes". Both badges can sit on the same
+   row, so they must never be mistaken for one another — the dot is round here
+   and square there, which survives greyscale printing as well as colour. */
+:root {
+  --bk-contacted-fg: #0f4f63;
+  --bk-contacted-bg: #d8ecf3;
+  --bk-contacted-line: #2b7d99;
+
+  --bk-confirmed-fg: #1b5130;
+  --bk-confirmed-bg: #d9ecdf;
+  --bk-confirmed-line: #2f7d4f;
+}
+.badge-booking-contacted { background: var(--bk-contacted-bg); color: var(--bk-contacted-fg); border-color: var(--bk-contacted-line); }
+.badge-booking-contacted::before { background: transparent; border-radius: 50%; }
+.badge-booking-confirmed { background: var(--bk-confirmed-bg); color: var(--bk-confirmed-fg); border-color: var(--bk-confirmed-line); }
+.badge-booking-confirmed::before { border-radius: 50%; }
+.booking-since { display: block; font-size: 11px; margin-top: 2px; }
+.booking-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.booking-actions .btn { font-size: 11px; padding: 2px 8px; }
+.booking-trip { margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--color-neutral-300); font-size: 12px; }
+
+/* A row carries its urgency as a left rule, not a fill — keeps tables calm */
+tr.u-overdue > td:first-child { box-shadow: inset 3px 0 0 var(--u-overdue-line); }
+tr.u-alarm   > td:first-child { box-shadow: inset 3px 0 0 var(--u-alarm-line); }
+tr.u-warning > td:first-child { box-shadow: inset 3px 0 0 var(--u-warning-line); }
+tr.u-plan    > td:first-child { box-shadow: inset 3px 0 0 var(--color-neutral-300); }
+
+/* --- table extensions: Industry's .table plus density, groups, stacking */
+
+/* A table too wide for its column scrolls inside its frame rather than
+   spilling past it. Not for a table with sticky headers: a scrolling
+   wrapper becomes what they stick to, so the schedule and calendar have none. */
+.table-wrap { border: 1px solid var(--color-text); overflow-x: auto; }
+.table-wrap .table { margin: 0; }
+.table thead th { background: var(--color-surface); border-bottom: 1px solid var(--color-text); }
+.table td { height: var(--row-h); vertical-align: middle; }
+.table tr.group-head td {
+  height: auto; padding: var(--space-3) var(--space-2) var(--space-2);
+  background: var(--color-bg); border-bottom: 1px solid var(--color-text); border-top: 1px solid var(--color-divider);
+}
+.table tr.group-head:hover { background: var(--color-bg); }
+.table .g-name { font-family: var(--font-heading); font-size: 17px; font-weight: var(--font-heading-weight); }
+.t-num { text-align: right; font-variant-numeric: tabular-nums; }
+.t-tight { width: 1%; }
+.table td.mono, .table td.t-tight, .table td.t-num { white-space: nowrap; }
+
+/* --- cards: Industry's .card + .blueprint stay transparent line drawings;
+   alert/note are denoted by border + kicker colour, never a surface fill */
+.card-alert { border-color: var(--u-overdue-line); }
+.card-alert .card-kicker { color: var(--u-overdue-line); }
+.card-note { border-color: var(--color-accent-600); }
+
+.dl { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; font-size: 14px; }
+.dl dt { font-family: var(--font-heading); font-size: 11px; font-weight: var(--font-heading-weight); letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-700); padding-top: 2px; }
+.dl dd { margin: 0; }
+
+/* --- 8-visit service cycle rail ----------------------------------------- */
+
+.cycle { display: grid; grid-template-columns: repeat(8, 1fr); border: 1px solid var(--color-text); }
+.cycle-step { padding: var(--space-2) var(--space-2) var(--space-3); border-right: 1px solid var(--color-divider); text-align: center; }
+.cycle-step:last-child { border-right: 0; }
+.cycle-step .n { font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.09em; color: var(--color-neutral-600); }
+.cycle-step .c { font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace; font-size: 13px; }
+.cycle-step.done { background: var(--color-neutral-200); color: var(--color-neutral-700); }
+.cycle-step.now { background: var(--color-accent); color: var(--color-bg); }
+.cycle-step.now .n, .cycle-step.now .c { color: var(--color-bg); }
+
+/* --- history timeline ---------------------------------------------------- */
+
+.timeline { border-left: 1px solid var(--color-neutral-400); margin-left: 88px; padding-left: 0; list-style: none; }
+.tl-item { position: relative; padding: 0 0 var(--space-8) var(--space-6); }
+.tl-item::before {
+  content: ""; position: absolute; left: -5px; top: 6px; width: 9px; height: 9px;
+  background: var(--color-bg); border: 1px solid var(--color-neutral-700);
+}
+.tl-item.is-deviation::before { background: var(--u-overdue-line); border-color: var(--u-overdue-line); }
+.tl-item .tl-date {
+  position: absolute; left: -88px; width: 76px; top: 2px; text-align: right;
+  font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace; font-size: 13px; color: var(--color-neutral-700);
+}
+.tl-title { font-family: var(--font-heading); font-size: 17px; font-weight: var(--font-heading-weight); }
+
+/* --- schedule (12-month rolling plan) ------------------------------------ */
+
+.month { border: 1px solid var(--color-text); margin-bottom: var(--space-6); }
+.month-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) var(--space-3); background: var(--color-surface); border-bottom: 1px solid var(--color-text); }
+.month-head h3 { font-size: 17px; margin: 0; }
+.month-empty { padding: var(--space-4) var(--space-3); color: var(--color-neutral-600); font-size: 13px; }
+
+/* --- trips on the schedule (Phase 3d, 2026-09-25): a heading over visits at
+   one site within the ±2 week window, with the whole-trip actions. */
+.table tr.trip-head td { height: auto; padding: var(--space-2) var(--space-2) 6px; background: var(--color-surface); border-top: 1px solid var(--color-divider); border-bottom: 1px solid var(--color-divider); }
+.table tr.trip-head:hover { background: var(--color-surface); }
+.trip-head-inner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.trip-head-inner .g-name { font-size: 15px; }
+.trip-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.trip-actions form { margin: 0; }
+.trip-actions .btn { font-size: 11px; padding: 2px 8px; min-height: 0; }
+tr.trip-member td[data-th="Customer"], tr.trip-member td[data-th="Site"] { color: var(--color-neutral-500); }
+
+/* --- form extensions: Industry's .field/.input plus hints, dropzone ----- */
+
+.form-section { border-top: 1px solid var(--color-text); padding-top: var(--space-4); margin-bottom: var(--space-8); }
+.form-section > h3 { margin-bottom: var(--space-4); }
+.field .hint { font-size: 13px; color: var(--color-neutral-600); }
+.req { color: var(--u-overdue-line); }
+.dropzone { border: 1px dashed var(--color-neutral-500); padding: var(--space-6); text-align: center; font-size: 13px; color: var(--color-neutral-700); background: color-mix(in srgb, #fff 40%, transparent); }
+.form-actions { display: flex; align-items: center; gap: var(--space-3); border-top: 1px solid var(--color-text); padding-top: var(--space-4); }
+.form-actions .spacer { margin-left: auto; }
+
+/* --- kit forecast: the warning when a kit has never been counted (Phase 3g) */
+.kit-stock-missing { margin-bottom: var(--space-6); }
+
+/* --- kpi strip, codebook pills, breadcrumb ------------------------------- */
+
+.status-line { font-size: 16px; max-width: 62ch; margin: 0 0 var(--space-6); color: var(--color-neutral-800); }
+.status-line strong { font-weight: 700; }
+
+.pill-code { font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace; font-size: 13px; border: 1px solid var(--color-neutral-400); padding: 1px 5px; background: var(--color-neutral-100); }
+.crumb { font-size: 13px; color: var(--color-neutral-700); margin-bottom: var(--space-2); }
+.crumb a::after { content: " ›"; color: var(--color-neutral-500); }
+
+/* --- responsive ----------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  .cols-2, .cols-3, .cols-main { grid-template-columns: 1fr; }
+  .kpi-strip { grid-template-columns: 1fr 1fr; }
+  .cycle { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (max-width: 720px) {
+  :root { --row-h: 52px; }
+  .shell { padding: var(--space-6) var(--space-4) var(--space-12); }
+  .nav-inner { display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-2) var(--space-4); }
+  .nav-links { display: flex; gap: var(--space-3); width: 100%; overflow-x: auto; }
+  .kpi-strip { grid-template-columns: 1fr; }
+  .kpi { border-right: 0; border-bottom: 1px solid var(--color-divider); }
+  .dl { grid-template-columns: 1fr; gap: var(--space-1); }
+  .dl dd { margin-bottom: var(--space-3); }
+  .timeline { margin-left: 0; }
+  .tl-item .tl-date { position: static; width: auto; text-align: left; display: block; margin-bottom: 2px; }
+  .btn { min-height: 44px; }
+  .table.responsive thead { display: none; }
+  .table.responsive tr { display: block; border-bottom: 1px solid var(--color-text); }
+  .table.responsive td { display: flex; justify-content: space-between; gap: var(--space-4); height: auto; padding: 6px var(--space-3); border-bottom: 0; box-shadow: none !important; }
+  .table.responsive td::before { content: attr(data-th); font-family: var(--font-heading); font-size: 11px; font-weight: var(--font-heading-weight); letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-600); }
+}
+
+@media print {
+  .nav, .btn { display: none; }
+  body { background: #fff; }
+}
+
+/* --- form validation + narrow form shell (§6.6) ------------------------- */
+.shell-form { max-width: 880px; }
+.field { margin-bottom: var(--space-4); }
+.field .error { font-size: 13px; color: var(--u-overdue-bg); margin-top: 4px; }
+.input.has-error { border-color: var(--u-overdue-bg); }
+/* A warned field is questionable, not wrong — amber rather than red, and the
+   save still goes through on a second press. */
+.input.has-warning { border-color: var(--u-alarm-line); }
+.form-error-summary {
+  border: 1px solid var(--u-overdue-bg); padding: var(--space-3);
+  margin-bottom: var(--space-6); font-size: 14px;
+}
+.danger-zone { border-top: 1px solid var(--color-divider); padding-top: var(--space-4); }
+
+/* --- the printable service report (Phase 3j): one A4 sheet. The @page rule
+   is *named*, so printing any other page keeps the browser's own margins. */
+@page report-sheet { size: A4; margin: 0; }
+.report-print { margin: 0; background: var(--color-surface); color: #1b1d24; }
+.report-bar { max-width: 210mm; margin: 0 auto; padding: 16px 0; display: flex; gap: 12px; align-items: center; }
+.report-bar .spacer { flex: 1; }
+.report-sheet { page: report-sheet; width: 210mm; min-height: 297mm; box-sizing: border-box; margin: 0 auto 32px; background: #fff; padding: 16mm 16mm 14mm; box-shadow: 0 1px 4px rgba(0,0,0,.12); font-size: 10.5pt; }
+.report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 1.5px solid var(--bqol-navy, #010841); padding-bottom: 10px; margin-bottom: 14px; }
+.report-head img { height: 17mm; margin: -3mm 0 -3mm -3mm; }
+.report-head .brand-text { font-family: var(--font-heading); font-size: 16pt; color: var(--bqol-navy, #010841); }
+.report-head .title { text-align: right; }
+.report-head .title h1 { font-size: 18pt; margin: 0; color: var(--bqol-navy, #010841); }
+.report-head .title div { font-size: 9.5pt; color: #555a66; }
+.report-info { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #c9ccd6; margin-bottom: 14px; }
+.report-info div { padding: 6px 9px; border-right: 1px solid #e1e3ea; border-bottom: 1px solid #e1e3ea; }
+.report-info div:nth-child(3n) { border-right: 0; }
+.report-info b { display: block; font-family: var(--font-heading); font-size: 7.5pt; letter-spacing: .09em; text-transform: uppercase; color: #555a66; font-weight: 600; margin-bottom: 1px; }
+.report-section { margin-bottom: 12px; }
+.report-section h2 { font-size: 11pt; margin: 0 0 4px; color: var(--bqol-navy, #010841); text-transform: uppercase; letter-spacing: .06em; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.report-table th { text-align: left; font-family: var(--font-heading); font-size: 7.5pt; letter-spacing: .09em; text-transform: uppercase; color: #555a66; border-bottom: 1px solid var(--bqol-navy, #010841); padding: 4px 6px; }
+.report-table td { border-bottom: 1px solid #e6e8ee; padding: 4px 6px; vertical-align: top; }
+.report-table tr { break-inside: avoid; }
+.report-table .result { width: 48px; white-space: nowrap; font-weight: 600; }
+.report-table .notes { width: 38%; color: #3b3f4a; }
+.result-yes { color: #1b5130; } .result-no { color: #8a3d05; }
+.report-deviations { border: 1px solid #7d2b1e; padding: 8px 10px; margin-bottom: 12px; }
+.report-deviations h2 { color: #7d2b1e; }
+.report-deviations ol { margin: 4px 0 0 18px; padding: 0; }
+.report-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 22mm; break-inside: avoid; }
+.report-sign div { border-top: 1px solid #1b1d24; padding-top: 4px; font-size: 9pt; color: #555a66; }
+.report-foot { margin-top: 16px; padding-top: 6px; border-top: 1px solid #c9ccd6; font-size: 8pt; color: #6b6f7a; display: flex; justify-content: space-between; gap: 12px; }
+@media print {
+  .report-print { background: #fff; }
+  .report-bar { display: none; }
+  .report-sheet { box-shadow: none; margin: 0; min-height: auto; }
+}
+
+/* --- calendar grid (Stage 4c) -------------------------------------------
+   Industry has no calendar component, so this is the one place the platform
+   draws its own layout. Deliberately plain: the day squares carry the same
+   badges, type and dividers as every other page, and nothing here is a new
+   colour — an entry's state is a word, never a shade. */
+.cal-grid { border: 1px solid var(--color-divider); }
+.cal-head, .cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-head > div {
+  padding: var(--space-2) var(--space-3);
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--color-neutral-600); border-bottom: 1px solid var(--color-divider);
+}
+.cal-week { border-bottom: 1px solid var(--color-divider); }
+.cal-week:last-child { border-bottom: 0; }
+.cal-day {
+  min-height: 108px; padding: var(--space-2);
+  border-right: 1px solid var(--color-divider);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cal-day:last-child { border-right: 0; }
+/* A day from the neighbouring month keeps the grid square without pretending
+   it belongs to this month. */
+.cal-out { background: var(--color-neutral-100); }
+.cal-out .cal-date { color: var(--color-neutral-400); }
+.cal-today { box-shadow: inset 0 0 0 2px var(--color-accent-800); }
+.cal-date { font-size: 12px; color: var(--color-neutral-600); }
+
+.cal-entry {
+  display: block; padding: 3px 5px; font-size: 12px; line-height: 1.3;
+  border-left: 3px solid var(--color-neutral-400);
+  background: var(--color-neutral-100); color: inherit; text-decoration: none;
+}
+.cal-entry:hover { background: var(--color-neutral-200); }
+.cal-entry .mono { font-size: 12px; }
+/* The serial and the customer read as one line - "60 (customer)" - so the
+   block is the line, not the serial. */
+.cal-unit { display: block; }
+.cal-customer { color: var(--color-neutral-600); }
+.cal-scope { color: var(--color-neutral-600); }
+.cal-state { display: block; font-size: 11px; color: var(--color-neutral-600); }
+/* Scheduled work is live, done work is history, and an implied visit is
+   neither — dashed, because nobody has agreed to it. */
+.cal-scheduled { border-left-color: var(--u-alarm-line); }
+.cal-done { border-left-color: var(--color-neutral-400); opacity: 0.75; }
+.cal-projected {
+  border-left-style: dashed; border-left-color: var(--color-neutral-400);
+  background: transparent;
+}
+
+.cal-year { display: grid; gap: var(--space-6); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@media (max-width: 900px) {
+  .cal-year { grid-template-columns: 1fr; }
+}
+/* A seven-column grid is unreadable on a phone, so the month becomes a list
+   of days and the empty ones drop out — the same responsive rule the tables
+   follow. */
+@media (max-width: 720px) {
+  .cal-head { display: none; }
+  .cal-week { grid-template-columns: 1fr; }
+  .cal-day { min-height: 0; border-right: 0; border-bottom: 1px solid var(--color-divider); }
+  .cal-day:not(:has(.cal-entry)) { display: none; }
+  .cal-out { display: none; }
+  .cal-date::after { content: " " attr(data-month); }
+}
+
+/* ============================================================================
+   BQOL v2 - Phase 1 (2026-09-25). Ported from the Claude Design prototype
+   (bqol-v2.css). Only the rules that style markup the app emits today; the
+   rest arrives with the phase that builds its markup, so nothing here
+   matches nothing. Prototype class names starting "v2-" are renamed to say
+   what they are, since "v2" will mean nothing in a year.
+   ========================================================================= */
+:root {
+  --bqol-navy: #010841;
+  /* Fixed so the sticky column headers know where the month bar ends
+     without JavaScript measuring it. */
+  --month-head-h: 36px;
+}
+
+/* Motion: colour changes fade instead of snapping. */
+a, .btn, .badge, .cal-entry, .table td, .nav a {
+  transition: background-color .14s ease, color .14s ease, border-color .14s ease,
+              box-shadow .14s ease, opacity .14s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  a, .btn, .badge, .cal-entry, .table td, .nav a { transition: none; }
+}
+
+/* Nav: darker bar, the current page underlined, quieter download buttons. */
+.nav { background: var(--bqol-navy); }
+.nav .nav-links a { padding: 6px 0; border-bottom: 2px solid transparent; text-decoration: none; }
+.nav .nav-links a[aria-current="page"] { border-bottom-color: #fff; }
+.nav .nav-right .btn-secondary { border-color: transparent; background: none; padding: 4px 6px; font-size: 13px; min-height: 0; }
+.nav .nav-right .btn-secondary:hover { border-color: transparent; background: none; color: #fff; text-decoration: underline; }
+@media (min-width: 721px) {
+  .nav .nav-links { gap: var(--space-6); }
+}
+
+/* One summary block: spacing from tokens instead of inline pixels. */
+.summary-block { padding: var(--space-4) var(--space-6); margin: 0 0 var(--space-6); }
+.summary-block > .row { gap: var(--space-8); }
+.summary-block .mono { font-size: 22px; }
+
+/* Keyboard focus shows which row you are on. Hover already comes from Industry. */
+.table tbody tr:focus-within { outline: 2px solid var(--color-accent-800); outline-offset: -2px; }
+
+/* Schedule and the calendar's year view: the month bar stays in view while
+   its rows scroll past, and the column headers stick directly beneath it.
+   The month grid's weekday row sticks too. Phones get none of it - the
+   responsive table hides its header row there anyway. */
+.page-schedule .month-head,
+.page-calendar .cal-year .month-head { position: sticky; top: 0; z-index: 3; height: var(--month-head-h); box-sizing: border-box; align-items: center; }
+.page-schedule .month thead th,
+.page-calendar .cal-year .month thead th { position: sticky; top: var(--month-head-h); z-index: 2; }
+.page-calendar .cal-head { position: sticky; top: 0; z-index: 2; background: var(--color-bg); }
+
+/* Empty months collapse to one dashed line. Scoped to the schedule and the
+   calendar: on the kit pages the same .month-empty box carries a real
+   message ("not counted yet") and must never be hidden. */
+.page-schedule .month:has(.month-empty),
+.page-calendar .month:has(.month-empty) { border-style: dashed; border-color: var(--color-neutral-400); margin-bottom: var(--space-3); }
+.page-schedule .month:has(.month-empty) .month-head,
+.page-calendar .month:has(.month-empty) .month-head { position: static; height: auto; background: transparent; border-bottom: 0; padding: 6px var(--space-3); }
+.page-schedule .month:has(.month-empty) .month-head h3,
+.page-calendar .month:has(.month-empty) .month-head h3 { font-size: 14px; color: var(--color-neutral-600); }
+.page-schedule .month:has(.month-empty) .month-empty,
+.page-calendar .month:has(.month-empty) .month-empty { display: none; }
+
+@media (max-width: 720px) {
+  .page-schedule .month-head,
+  .page-calendar .cal-year .month-head { position: static; height: auto; }
+  .page-schedule .month thead th,
+  .page-calendar .cal-year .month thead th { position: static; }
+}
+
+/* ============================================================================
+   BQOL v2 - Phase 2 (2026-09-25): brand, icons, unit photo, "More" menu.
+   ========================================================================= */
+
+/* Brand. The logo image is optional - it lives in the gitignored data/
+   folder - so the text brand beside it must look right on its own too. */
+.nav a.nav-brand { display: flex; align-items: center; gap: var(--space-2); color: #fff; text-decoration: none; }
+.nav a.nav-brand:hover { color: #fff; }
+.nav-brand small { margin-left: 0; padding-left: var(--space-2); border-left: 1px solid var(--color-accent-300); }
+.brand-logo { height: 44px; margin: -9px -15px -9px -7px; display: block; }
+
+/* Service and kit icons (src/templates/_icons.html). Decorative: the text
+   beside each one says the same thing. */
+.service-icon { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; margin-right: 6px; color: var(--bqol-navy); flex: none; }
+.cycle-step .service-icon { margin-right: 4px; width: 14px; height: 14px; }
+.cycle-step.now .service-icon { color: inherit; }
+.cal-scope .service-icon { width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; }
+.cal-done .cal-scope .service-icon { color: var(--color-neutral-600); }
+
+/* The unit photo, top of the unit page's side column. */
+.unit-photo { margin: 0; border: 1px solid var(--color-divider); background: #fff; display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: var(--space-4); padding: var(--space-3); }
+.unit-photo img { width: 96px; height: auto; display: block; }
+
+/* "More": the rarer and destructive unit actions behind one click. A
+   <details> element, so it opens and closes with no JavaScript. */
+.more-menu { position: relative; }
+.more-menu > summary { list-style: none; cursor: pointer; }
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu > summary::after { content: " \25BE"; }
+.more-menu-list { position: absolute; right: 0; top: calc(100% + 4px); min-width: 180px; background: var(--color-bg); border: 1px solid var(--color-text); z-index: 20; display: flex; flex-direction: column; }
+.more-menu-list > * { margin: 0; }
+.more-menu-list .btn { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--color-divider); background: none; padding: 10px 12px; }
+.more-menu-list > *:last-child .btn, .more-menu-list > .btn:last-child { border-bottom: 0; }
+.more-menu-list .btn:hover { background: var(--color-neutral-200); }
+.more-menu-list .more-menu-danger { color: var(--u-overdue-bg); }
+
+/* ============================================================================
+   Technicians (2026-09-25): the per-visit picker and the schedule filter.
+   ========================================================================= */
+.assign-form { display: flex; align-items: center; gap: 4px; margin: 0; }
+.assign-select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--color-neutral-400); background: var(--color-bg); color: var(--color-text); max-width: 160px; }
+.assign-select:focus { outline: 2px solid var(--color-accent-800); outline-offset: 1px; }
+.assign-form .btn { font-size: 11px; padding: 2px 8px; min-height: 0; }
+.booking-trip .assign-form { margin-top: 6px; }
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); margin: 0 0 var(--space-4); }
+.filter-bar .input { min-height: 0; padding: 5px 8px; font-size: 13px; width: auto; }
+.filter-bar-end { margin-left: auto; }
+@media (max-width: 720px) {
+  .filter-bar-end { margin-left: 0; }
+  .assign-select { max-width: none; }
+}
+
+/* ============================================================================
+   Booking from list rows (2026-09-25). The buttons wait until a row is
+   hovered or holds keyboard focus, so eighty rows stay calm; on a phone,
+   where there is no hover, they are always there.
+   ========================================================================= */
+.row-actions { margin-top: 4px; }
+.row-actions form { margin: 0; }
+@media (hover: hover) and (min-width: 721px) {
+  .row-actions { opacity: 0; }
+  tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
+}
+
+/* ============================================================================
+   List filters (2026-09-25): chips are checkboxes, styled; no JavaScript.
+   ========================================================================= */
+.filter-search { min-width: 220px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border: 0; margin: 0; padding: 0; }
+.chips legend { float: left; margin-right: 4px; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-heading); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--color-neutral-400); color: var(--color-neutral-800); cursor: pointer; }
+.chip:hover { border-color: var(--color-text); }
+.chip:has(input:checked) { background: var(--color-text); border-color: var(--color-text); color: var(--color-bg); }
+.chip input { margin: 0; accent-color: var(--color-bg); }
+.chip:has(input:focus-visible) { outline: 2px solid var(--color-accent-800); outline-offset: 1px; }
+.filter-count { margin-left: auto; }
+@media (max-width: 720px) {
+  .filter-search { min-width: 0; width: 100%; }
+  .filter-count { margin-left: 0; }
+}
+@media print { .filter-bar { display: none; } }
