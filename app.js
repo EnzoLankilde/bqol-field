@@ -50,7 +50,6 @@
         hours: "Technician hours", part: "Spare part" };
     const ADD_BUTTONS = [["part", "Add part"], ["hours", "Add hours"], ["chemistry", "Add chemistry"],
         ["kit", "Add kit"], ["visit", "Add another visit"]];
-    const DEFAULT_VISIT_TYPE = "serviceaftale";
     const AGREEMENT_NONE = "none";
     const AGREEMENT_LABEL = { none: "No agreement", prepaid: "Prepaid agreement",
         sla: "SLA - invoiced after each visit" };
@@ -1490,14 +1489,31 @@
         return line;
     }
 
+    /** The visit type a sheet starts on for this customer's agreement. The
+        rules file says which (`starts_as`), so the app never names a visit
+        type itself; an older pack without it starts on the first type. */
+    function startingVisitType(parts) {
+        const billing = state.pack.billing;
+        const types = Object.keys(billing.visit_types || {});
+        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date).kind;
+        const wanted = asText((billing.starts_as || {})[agreement]);
+        return types.indexOf(wanted) !== -1 ? wanted : (types[0] || "");
+    }
+
+    /** A visit arranged from the service cycle, whose visit line starts with
+        the unit's next cycle visit - the rules file's `cycle_visit_types`. */
+    function isCycleVisitType(visitType) {
+        const listed = state.pack.billing.cycle_visit_types;
+        return Array.isArray(listed) && listed.indexOf(visitType) !== -1;
+    }
+
     function newPartsValues() {
-        const types = Object.keys(state.pack.billing.visit_types || {});
         const techs = state.pack.technicians;
-        return {
+        const parts = {
             step: "start",
             site_id: "",
             trip_date: todayIso(),
-            visit_type: types.indexOf(DEFAULT_VISIT_TYPE) !== -1 ? DEFAULT_VISIT_TYPE : (types[0] || ""),
+            visit_type: "",
             technician_id: techs.length === 1 ? String(techs[0].id) : "",
             units: [],
             notes: "",
@@ -1505,6 +1521,8 @@
             prefilled: false,
             kitted: [],
         };
+        parts.visit_type = startingVisitType(parts);
+        return parts;
     }
 
     function newParts() {
@@ -1530,7 +1548,7 @@
         if (!parts.prefilled) {
             const first = findUnit(parts.units[0]);
             const prefill = (first && first.parts_prefill) || {};
-            const visitItem = parts.visit_type === DEFAULT_VISIT_TYPE ? asText(prefill.visit_item) : "";
+            const visitItem = isCycleVisitType(parts.visit_type) ? asText(prefill.visit_item) : "";
             parts.lines.unshift(newLine(parts, LINE_VISIT, visitItem, "1", []));
             parts.prefilled = true;
         }
@@ -1626,7 +1644,7 @@
                     <div class="field">
                         <label for="parts-type">Visit type ∗</label>
                         <select class="${inputClass(headerName("visit_type"))}" id="parts-type" data-head="visit_type">${typeOptions}</select>
-                        ${note(headerName("visit_type"), "A planned visit is always a service agreement visit, even at a site with no agreement.")}
+                        ${note(headerName("visit_type"), "Set from the customer's agreement. Change it when the customer called us out.")}
                     </div>
                 </div>
                 <div class="field">
@@ -1700,7 +1718,6 @@
             </div>
             <div class="form-section">
                 <h3>Lines</h3>
-                ${partsDatalists()}
                 ${parts.lines.length ? "" : note(rowNames(0).number)}
                 <div id="parts-rows">${parts.lines.map((line, index) => partsRow(parts, line, index)).join("") || `<p class="hint">No lines yet.</p>`}</div>
                 <div class="field-actions parts-add">${adds}</div>
@@ -1720,11 +1737,6 @@
             </div>`;
     }
 
-    /** One list of items per kind, so each line offers only its own kind. */
-    function partsDatalists() {
-        return Object.keys(KIND_LABEL).map((kind) => `<datalist id="parts-choice-${esc(kind)}">${itemsOfKind(kind).map((item) => `<option value="${esc(item.number)}">${esc(item.number)} ${esc(item.description)}</option>`).join("")}</datalist>`).join("");
-    }
-
     function partsRow(parts, line, index) {
         return `<div class="parts-row${isOverruled(parts, line) ? " is-overruled" : ""}" id="parts-row-${index}">
             <div class="parts-row-head">
@@ -1737,15 +1749,83 @@
         </div>`;
     }
 
+    /* -------- the item picker: one box. Tapping it lists every item of the
+       line's kind to scroll through; typing narrows the same list. Only a
+       tap on the list chooses, so a typed number can never be a stray one. */
+
+    function itemText(item) {
+        return item ? `${item.number} – ${item.description}` : "";
+    }
+
     function itemField(line, index) {
         const key = rowNames(index).number;
         const item = findItem(line.number);
-        const described = item && item.kind === line.kind ? item.description : "Type the number or part of the description, then pick from the list.";
-        return `<div class="field">
+        const chosen = item && item.kind === line.kind ? item : null;
+        return `<div class="field parts-pick" data-picker="${index}">
             <label for="parts-pick-${index}">Item ∗</label>
-            <input class="${inputClass(key)}" id="parts-pick-${index}" list="parts-choice-${esc(line.kind)}" value="${esc(line.number)}" data-row="${index}" data-cell="number" autocomplete="off" autocorrect="off" spellcheck="false">
-            ${note(key, described)}
+            <input class="${inputClass(key)}" id="parts-pick-${index}" value="${esc(itemText(chosen))}" data-pick="${index}" placeholder="Tap to choose, or type to search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <div class="parts-pick-list" id="parts-pick-list-${index}" hidden></div>
+            ${note(key)}
         </div>`;
+    }
+
+    /** Every item of the line's kind whose number or description holds each
+        word typed - "o-ring 2.00" finds the 2.00 O-ring. */
+    function matchingItems(kind, query) {
+        const words = asText(query).toLowerCase().split(/\s+/).filter(Boolean);
+        return itemsOfKind(kind).filter((item) => {
+            const text = `${item.number} ${item.description}`.toLowerCase();
+            return words.every((word) => text.indexOf(word) !== -1);
+        });
+    }
+
+    function showPicker(input, query) {
+        const index = Number(input.getAttribute("data-pick"));
+        const parts = currentParts() ? currentParts().parts : null;
+        const line = parts ? parts.lines[index] : null;
+        const list = document.getElementById(`parts-pick-list-${index}`);
+        if (!line || !list) return;
+        const items = matchingItems(line.kind, query);
+        list.innerHTML = items.length
+            ? items.map((item) => `<button class="parts-pick-option${item.number === line.number ? " is-chosen" : ""}" type="button" data-action="pick-item" data-row="${index}" data-number="${esc(item.number)}">${esc(itemText(item))}</button>`).join("")
+            : `<p class="hint">Nothing matches. Clear the box to see the whole list.</p>`;
+        list.hidden = false;
+    }
+
+    /** Close every open list, putting each box back to the item it holds -
+        a search that was never picked from changes nothing. */
+    function closePickers(except) {
+        document.querySelectorAll(".parts-pick-list").forEach((list) => {
+            if (list.hidden || (except && except.contains(list))) return;
+            list.hidden = true;
+            const index = Number(list.id.replace("parts-pick-list-", ""));
+            const record = currentParts();
+            const line = record ? record.parts.lines[index] : null;
+            const input = document.getElementById(`parts-pick-${index}`);
+            const item = line ? findItem(line.number) : null;
+            if (input) input.value = itemText(item && item.kind === line.kind ? item : null);
+        });
+    }
+
+    function pickItem(el) {
+        const record = currentParts();
+        const index = Number(el.getAttribute("data-row"));
+        const line = record ? record.parts.lines[index] : null;
+        if (!line) return;
+        line.number = el.getAttribute("data-number");
+        delete state.errors[rowNames(index).number];
+        touch(record);
+        if (document.activeElement) document.activeElement.blur();
+        refreshRow(record.parts, index);
+    }
+
+    function onFocusIn(event) {
+        const input = event.target.closest ? event.target.closest("[data-pick]") : null;
+        closePickers(input ? input.closest(".parts-pick") : null);
+        if (input) {
+            input.value = "";
+            showPicker(input, "");
+        }
     }
 
     function totalHint(parts, line) {
@@ -1817,6 +1897,11 @@
     function onPartsEdit(target, isChange) {
         const record = currentParts();
         if (!record) return;
+        if (target.hasAttribute("data-pick")) {
+            // Typing searches; only a tap on the list chooses an item.
+            if (!isChange) showPicker(target, target.value);
+            return;
+        }
         const parts = record.parts;
         let redraw = false;
         if (target.hasAttribute("data-head")) {
@@ -1859,6 +1944,7 @@
             parts.lines = [];
             parts.kitted = [];
             parts.prefilled = false;
+            parts.visit_type = startingVisitType(parts);
             record.label = siteLabel(findSite(value));
             return;
         }
@@ -1879,7 +1965,6 @@
         }
         line[cell] = target.value;
         if (cell === "quantity") refreshTotal(parts, index);
-        if (cell === "number" && isChange) refreshRow(parts, index);
     }
 
     function refreshTotal(parts, index) {
@@ -2207,9 +2292,11 @@
         "add-row": (el) => addRow(el.getAttribute("data-kind")),
         "remove-row": (el) => removeRow(Number(el.getAttribute("data-row"))),
         "row-all": (el) => allUnits(Number(el.getAttribute("data-row"))),
+        "pick-item": pickItem,
     };
 
     function onClick(event) {
+        if (!event.target.closest(".parts-pick")) closePickers();
         const el = event.target.closest("[data-action]");
         if (!el) return;
         const action = ACTIONS[el.getAttribute("data-action")];
@@ -2245,6 +2332,9 @@
     function onSubmit(event) {
         if (event.target.id === "parts-form") {
             event.preventDefault();
+            // Return in an item search box means "search", never "finish the sheet".
+            const active = document.activeElement;
+            if (active && active.hasAttribute && active.hasAttribute("data-pick")) return;
             submitParts();
             return;
         }
@@ -2267,6 +2357,7 @@
         app.addEventListener("input", onInput);
         app.addEventListener("change", onChange);
         app.addEventListener("submit", onSubmit);
+        app.addEventListener("focusin", onFocusIn);
         window.addEventListener("hashchange", onRoute);
         if (!window.location.hash) {
             window.location.replace(state.pack ? "#units" : "#pack");

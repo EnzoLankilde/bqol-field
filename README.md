@@ -119,7 +119,9 @@ A pack from a platform that has the parts list also carries `parts`, `billing`,
   "parts": {"version": "...", "items": [{"number": "90001", "description": "...", "kind": "visit"}],
             "storage_locations": ["..."], "problems": []},
   "billing": {"version": "...", "confirmed": false, "ok": true,
-              "visit_types": {"serviceaftale": "...", "tilkaldt": "...", "garanti": "..."},
+              "visit_types": {"serviceaftale": "...", "planlagt": "...", "tilkaldt": "..."},
+              "starts_as": {"none": "planlagt", "prepaid": "serviceaftale", "sla": "serviceaftale"},
+              "cycle_visit_types": ["serviceaftale", "planlagt"],
               "table": {"<agreement>": {"<visit type>": {"<line kind>": {"invoice": true, "reason": "..."}}}}},
   "parts_sheet": {"header": {"site_id": "...", "trip_date": "...", "visit_type": "...",
                              "technician_id": "...", "units": "...", "notes": "..."},
@@ -132,6 +134,8 @@ A pack from a platform that has the parts list also carries `parts`, `billing`,
 
 Per unit: `"parts_prefill": {"visit_item": "90001", "kit_items": [{"number": "90021", "quantity": "1"}]}`,
 worked out on the platform from the unit's next cycle visit.
+
+Each site's `agreement` is its customer's - every site of one customer carries the same one.
 
 The app never works out who pays. Each line's invoice yes/no starts from
 `billing.table[agreement][visit_type][line kind]`; the only date logic is that an agreement

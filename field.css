@@ -50,6 +50,9 @@ input[type="file"].input { padding: 10px; }
 .parts-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
 .parts-overruled { background: var(--u-warning-bg); color: var(--u-warning-fg); }
 .parts-add { justify-content: flex-start; }
+.parts-pick-list { max-height: 280px; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--color-divider); background: var(--color-surface); margin-top: 2px; }
+.parts-pick-option { display: block; width: 100%; text-align: left; padding: 12px var(--space-4); border: 0; border-bottom: 1px solid var(--color-divider); background: transparent; font: inherit; color: inherit; }
+.parts-pick-option.is-chosen { font-weight: 600; }
 .parts-sheet .num { text-align: right; white-space: nowrap; }
 .parts-sheet .parts-foot { font-size: 8.5pt; margin-top: 4px; }
 
