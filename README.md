@@ -15,7 +15,7 @@ installation report or a parts sheet on site, with no connection, and the platfo
    - **Installation report** - only on units the pack marks as due one. A unit has one
      installation report, so once it exists on the iPad the button opens that one
      (**Resume installation** while it is a draft).
-   Above the list, **Parts used** starts a parts sheet for a trip to one site (see below).
+   Above the list, **Parts used** starts a parts sheet for a trip to one customer's sites (see below).
 4. Press **Finish**. The A4 report appears: **Print / Save as PDF** uses Safari's own print,
    and **Save data file** shares or downloads the report data file.
 5. Send the data file to the office, import it on the platform, and **Mark as sent**.
@@ -123,11 +123,13 @@ A pack from a platform that has the parts list also carries `parts`, `billing`,
               "starts_as": {"none": "planlagt", "prepaid": "serviceaftale", "sla": "serviceaftale"},
               "cycle_visit_types": ["serviceaftale", "planlagt"],
               "table": {"<agreement>": {"<visit type>": {"<line kind>": {"invoice": true, "reason": "..."}}}}},
-  "parts_sheet": {"header": {"site_id": "...", "trip_date": "...", "visit_type": "...",
+  "parts_sheet": {"header": {"site_ids": "...", "trip_date": "...", "visit_type": "...",
                              "technician_id": "...", "units": "...", "notes": "..."},
-                  "lines": [{"number": "...", "quantity": "...", "units": "...", "invoice": "...", "storage": "..."}],
+                  "lines": [{"number": "...", "quantity": "...", "units": "...", "invoice": "...",
+                             "warranty": "...", "storage": "..."}],
                   "trip_kinds": ["visit", "hours"], "unit_kinds": ["kit", "chemistry", "part"]},
-  "sites": [{"id": 1, "customer": "...", "label": "...", "agreement": {"kind": "none", "expires": ""}}],
+  "sites": [{"id": 1, "customer_id": 1, "customer": "...", "label": "...",
+             "agreement": {"kind": "none", "expires": ""}}],
   "technicians": [{"id": 1, "name": "...", "initials": "..."}]
 }
 ```
@@ -135,34 +137,48 @@ A pack from a platform that has the parts list also carries `parts`, `billing`,
 Per unit: `"parts_prefill": {"visit_item": "90001", "kit_items": [{"number": "90021", "quantity": "1"}]}`,
 worked out on the platform from the unit's next cycle visit.
 
-Each site's `agreement` is its customer's - every site of one customer carries the same one.
+Each site's `agreement` is its customer's - every site of one customer carries the same one -
+and `customer_id` says whose it is. **One sheet is one customer's**: the start step lists the sites
+as tick boxes grouped by customer, and ticking a site of another customer clears the ones ticked
+so far (the simpler of the two behaviours; the other was greying them out). The units offered
+are those at any ticked site, under a heading per site. The visit type a sheet starts on and the
+agreement warning come from the customer, through its first ticked site. A pack from before
+`customer_id` groups by the customer's name instead.
 
 The app never works out who pays. Each line's invoice yes/no starts from
 `billing.table[agreement][visit_type][line kind]`; the only date logic is that an agreement
 whose `expires` is before the trip date counts as `none`, with a warning. The technician can
 overrule a line; the platform decides on import whether the posted answer differs from the rule.
+**Garanti** is a tick under each line's Invoice: ticked, the line posts `warranty` "yes" and
+invoice "no", the select is disabled, and the line is never counted as overruled; unticked, it
+goes back to the rule, or to the technician's own yes/no if he had overruled it first. A pack
+without a `warranty` name in its line rows (an older one) shows no Garanti tick.
 A trip line (`trip_kinds`) names no units and its quantity is for the whole trip; a unit line
 names the units it went into, from the trip's ticked units only, and its quantity is per unit.
 On a one-unit trip every unit line is on that unit.
 
-Saved as `parts-site<site id>-<trip date>.json`:
+Saved as `parts-customer<customer id>-<trip date>.json`:
 
 ```json
 {
-  "format": "bqol-field-report", "version": 1, "kind": "parts", "site_id": "1",
+  "format": "bqol-field-report", "version": 1, "kind": "parts", "customer_id": "1",
   "made_at": "2026-10-02T14:03:00", "parts_version": "...", "billing_version": "...",
   "pack_made_on": "2026-09-30",
-  "fields": {"site_id": "1", "trip_date": "2026-10-02", "visit_type": "serviceaftale",
+  "fields": {"site_ids": "1 4", "trip_date": "2026-10-02", "visit_type": "serviceaftale",
              "technician_id": "1", "units": "900 901", "notes": "",
              "<lines[0].number>": "90001", "<lines[0].quantity>": "1", "<lines[0].units>": "",
-             "<lines[0].invoice>": "no", "<lines[0].storage>": "", "...": "..."}
+             "<lines[0].invoice>": "no", "<lines[0].warranty>": "", "<lines[0].storage>": "",
+             "...": "..."}
 }
 ```
 
 Every header field and every row of `parts_sheet.lines` is present, blank or not, and every
 value is a string. A row with no item and no quantity is empty. Units are BQ serials separated
-by a space. Its A4 sheet is the logistics sheet: every line with its quantity per unit, the
-units, the total, invoice Yes/No (marked when overruled) and where it was taken from.
+by a space, and so are the site ids. The envelope's `customer_id` names the file; the platform
+works the customer out from the sites again and refuses sites of two customers. Its A4 sheet is
+the logistics sheet: Customer, Sites, and every line with its quantity per unit, the units, the
+total, invoice Yes/No (marked when overruled, "No – Garanti" on a Garanti line) and where it was
+taken from.
 
 ## Trying it locally
 

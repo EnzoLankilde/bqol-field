@@ -112,7 +112,19 @@
         const reports = parseJson(readStore(REPORTS_KEY), []);
         state.reports = Array.isArray(reports) ? reports.filter(isRecord) : [];
         // Phase 1 saved service reports with no kind; they are service reports.
-        state.reports.forEach((record) => { record.kind = kindOf(record); });
+        state.reports.forEach((record) => {
+            record.kind = kindOf(record);
+            if (record.kind === KIND_PARTS) normaliseParts(record.parts);
+        });
+    }
+
+    /** A parts draft saved before a sheet could cover several sites held one
+        `site_id`; it becomes a list of one. */
+    function normaliseParts(parts) {
+        if (!isRecord(parts)) return;
+        if (!Array.isArray(parts.site_ids)) parts.site_ids = parts.site_id ? [String(parts.site_id)] : [];
+        delete parts.site_id;
+        if (parts.customer_key === undefined) parts.customer_key = "";
     }
 
     function isRecord(record) {
@@ -1271,7 +1283,7 @@
     function reportFileName(report, record) {
         const safe = (value) => asText(value).replace(/[^A-Za-z0-9._-]/g, "_");
         if (report.kind === KIND_PARTS) {
-            return `parts-site${safe(report.site_id)}-${safe(record.parts.trip_date)}.json`;
+            return `parts-customer${safe(report.customer_id)}-${safe(record.parts.trip_date)}.json`;
         }
         if (report.kind === KIND_INSTALLATION) {
             return `installation-${safe(report.bq)}-${safe(report.fields.installed_on)}.json`;
@@ -1342,8 +1354,8 @@
     }
 
     /* ---------------------------------------------------------------- parts used
-       One sheet per trip to one site: which units were serviced, and a line
-       per billable item. The field names come from the pack's `parts_sheet`
+       One sheet per trip to one customer - one site or several of theirs:
+       which units were serviced, and a line per billable item. The field names come from the pack's `parts_sheet`
        (the platform's parts_sheet.py); the draft keeps plain values and
        the report file maps them onto those names at the last moment.
        Whether a line is invoiced is looked up in the pack's resolved billing
@@ -1398,13 +1410,46 @@
         return state.pack.units.filter((unit) => String(unit.site_id) === String(siteId));
     }
 
+    /** Which customer a site belongs to: its id - or, in a pack made before
+        sites carried one, its name. */
+    function customerKey(site) {
+        if (!site) return "";
+        const id = asText(site.customer_id);
+        return id ? `id:${id}` : `name:${asText(site.customer)}`;
+    }
+
+    /** The ticked sites, in the pack's order. */
+    function tickedSites(parts) {
+        return state.pack.sites.filter((site) => parts.site_ids.indexOf(String(site.id)) !== -1);
+    }
+
+    /** The sheet's customer, as its first ticked site carries it - every
+        ticked site is one customer's, agreement and all. */
+    function customerSite(parts) {
+        return tickedSites(parts)[0] || null;
+    }
+
+    /** The customer the sheet is for: the one last ticked, kept while every
+        site is unticked, so ticking one of theirs again starts nothing over. */
+    function sheetCustomerKey(parts) {
+        return parts.customer_key || customerKey(customerSite(parts));
+    }
+
+    /** Every unit at a ticked site, site by site. */
+    function tripUnits(parts) {
+        return tickedSites(parts).reduce((all, site) => all.concat(siteUnits(site.id)), []);
+    }
+
     function unitLabel(bq) {
         const unit = findUnit(bq);
         return unit && unit.label ? unit.label : String(bq);
     }
 
-    function siteLabel(site) {
-        return site ? `${orDash(site.customer)} · ${orDash(site.label)}` : KIND_TITLE[KIND_PARTS];
+    /** "Customer · Site, Site" - how the sheet is named in Reports. */
+    function recordLabel(parts) {
+        const sites = tickedSites(parts);
+        if (!sites.length) return KIND_TITLE[KIND_PARTS];
+        return `${orDash(sites[0].customer)} · ${sites.map((site) => orDash(site.label)).join(", ")}`;
     }
 
     function visitTypeLabel(key) {
@@ -1414,10 +1459,10 @@
 
     function partsCovered(record) {
         if (!partsPack() || !record.parts) return false;
-        return !record.parts.site_id || Boolean(findSite(record.parts.site_id));
+        return record.parts.site_ids.every((id) => Boolean(findSite(id)));
     }
 
-    /** The site's agreement on the trip day. The one piece of date logic
+    /** The customer's agreement on the trip day, as a site carries it. The one piece of date logic
         the app does, and the same as billing.agreement_on: an agreement past
         its expiry is no agreement. Everything after that is a lookup. */
     function agreementOn(site, tripDate) {
@@ -1434,23 +1479,28 @@
         missing cell - a pack whose rules could not cover it - is invoiced,
         as the platform does: a wrong invoice is credited, a missed one is lost. */
     function ruleFor(parts, kind) {
-        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date).kind;
+        const agreement = agreementOn(customerSite(parts), parts.trip_date).kind;
         const byType = (state.pack.billing.table[agreement] || {})[parts.visit_type] || {};
         const cell = byType[kind];
         if (!cell) return { invoice: "yes", reason: "No billing rule in the pack for this line - invoiced." };
         return { invoice: cell.invoice === true ? "yes" : "no", reason: asText(cell.reason) };
     }
 
-    /** A line nobody has overruled follows the rule; an overruled one is left alone. */
+    /** A Garanti line is never invoiced; an overruled one keeps the
+        technician's own choice; every other line follows the rule. */
     function applyRule(parts, line) {
-        if (!line.manual) line.invoice = ruleFor(parts, line.kind).invoice;
+        if (line.warranty) line.invoice = "no";
+        else if (line.manual) line.invoice = line.manual_invoice || line.invoice;
+        else line.invoice = ruleFor(parts, line.kind).invoice;
     }
 
     function applyRules(parts) {
         parts.lines.forEach((line) => applyRule(parts, line));
     }
 
+    /** Set against the rule. A Garanti line never is - it has its own reason. */
     function isOverruled(parts, line) {
+        if (line.warranty) return false;
         return Boolean(line.invoice) && line.invoice !== ruleFor(parts, line.kind).invoice;
     }
 
@@ -1483,7 +1533,8 @@
 
     function newLine(parts, kind, number, quantity, units) {
         const line = { kind: kind, number: number || "", quantity: quantity || "",
-            units: units || [], invoice: "", manual: false, storage: "", auto: false };
+            units: units || [], invoice: "", manual: false, manual_invoice: "", warranty: false,
+            storage: "", auto: false };
         if (!isTripKind(kind) && !line.units.length && parts.units.length === 1) line.units = parts.units.slice();
         applyRule(parts, line);
         return line;
@@ -1495,7 +1546,7 @@
     function startingVisitType(parts) {
         const billing = state.pack.billing;
         const types = Object.keys(billing.visit_types || {});
-        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date).kind;
+        const agreement = agreementOn(customerSite(parts), parts.trip_date).kind;
         const wanted = asText((billing.starts_as || {})[agreement]);
         return types.indexOf(wanted) !== -1 ? wanted : (types[0] || "");
     }
@@ -1511,7 +1562,8 @@
         const techs = state.pack.technicians;
         const parts = {
             step: "start",
-            site_id: "",
+            site_ids: [],
+            customer_key: "",
             trip_date: todayIso(),
             visit_type: "",
             technician_id: techs.length === 1 ? String(techs[0].id) : "",
@@ -1542,9 +1594,7 @@
         unit ticked since gets its kits and one unticked loses the ones it
         was given - nothing the technician added is touched. */
     function fitLinesToUnits(parts) {
-        parts.lines.forEach((line) => { line.units = line.units.filter((bq) => parts.units.indexOf(bq) !== -1); });
-        parts.lines = parts.lines.filter((line) => !(line.auto && !line.units.length));
-        parts.kitted = parts.kitted.filter((bq) => parts.units.indexOf(bq) !== -1);
+        pruneToUnits(parts);
         if (!parts.prefilled) {
             const first = findUnit(parts.units[0]);
             const prefill = (first && first.parts_prefill) || {};
@@ -1555,6 +1605,14 @@
         parts.units.forEach((bq) => {
             if (parts.kitted.indexOf(bq) === -1) addKitLines(parts, findUnit(bq));
         });
+    }
+
+    /** Lines keep only units still ticked; a kit line the app added for a
+        unit no longer ticked goes with it. */
+    function pruneToUnits(parts) {
+        parts.lines.forEach((line) => { line.units = line.units.filter((bq) => parts.units.indexOf(bq) !== -1); });
+        parts.lines = parts.lines.filter((line) => !(line.auto && !line.units.length));
+        parts.kitted = parts.kitted.filter((bq) => parts.units.indexOf(bq) !== -1);
     }
 
     function addKitLines(parts, unit) {
@@ -1594,7 +1652,7 @@
             return `<main class="shell shell-form">${pageHead(record.label, "Parts used")}<p>The loaded field pack has no parts list, so this sheet cannot be shown. Load a newer pack on the <a href="#pack">Pack</a> screen.</p></main>`;
         }
         if (!partsCovered(record)) {
-            return `<main class="shell shell-form">${pageHead(record.label, "Parts used")}<p>This site is not in the loaded field pack. Load the pack it came from on the <a href="#pack">Pack</a> screen.</p></main>`;
+            return `<main class="shell shell-form">${pageHead(record.label, "Parts used")}<p>A site on this sheet is not in the loaded field pack. Load the pack it came from on the <a href="#pack">Pack</a> screen.</p></main>`;
         }
         state.currentId = record.id;
         const parts = record.parts;
@@ -1603,7 +1661,7 @@
         return `<main class="shell shell-form">
             <div class="crumb"><a href="#units">Units</a><span>${esc(record.label)} · Parts used</span></div>
             ${banners()}
-            ${pageHead(parts.step === "lines" ? siteLabel(findSite(parts.site_id)) : "One sheet per trip to one site", "Parts used", parts.step === "lines" ? "Step 2 of 2 · Lines" : "Step 1 of 2 · The trip")}
+            ${pageHead(parts.step === "lines" ? recordLabel(parts) : "One sheet per trip to one customer", "Parts used", parts.step === "lines" ? "Step 2 of 2 · Lines" : "Step 1 of 2 · The trip")}
             ${partsNotices(parts)}
             ${count ? `<div class="form-error-summary">Nothing was saved. Check the ${count} field${count === 1 ? "" : "s"} marked below.</div>` : ""}
             <form id="parts-form" novalidate autocomplete="off">${body}</form>
@@ -1615,9 +1673,9 @@
         if (!state.pack.billing.confirmed) {
             html += `<p class="hint">The billing rules are provisional - the office may still change what is invoiced.</p>`;
         }
-        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date);
+        const agreement = agreementOn(customerSite(parts), parts.trip_date);
         if (agreement.expired) {
-            html += `<div class="form-error-summary field-banner">The site's agreement expired on ${esc(niceDate(agreement.expires))}. This trip is treated as having no agreement - check with the office if that is wrong.</div>`;
+            html += `<div class="form-error-summary field-banner">The customer's agreement expired on ${esc(niceDate(agreement.expires))}. This trip is treated as having no agreement - check with the office if that is wrong.</div>`;
         }
         return html;
     }
@@ -1628,13 +1686,11 @@
         const techOptions = state.pack.technicians.map((tech) => `<option value="${esc(tech.id)}"${String(parts.technician_id) === String(tech.id) ? " selected" : ""}>${esc(tech.name)}${tech.initials ? ` (${esc(tech.initials)})` : ""}</option>`).join("");
         return `<div class="form-section">
                 <h3>The trip</h3>
-                <div class="field">
-                    <label for="parts-site">Site ∗</label>
-                    <select class="${inputClass(headerName("site_id"))}" id="parts-site" data-head="site_id">
-                        <option value="">Choose the site</option>${siteOptions(parts)}
-                    </select>
-                    ${note(headerName("site_id"), agreementHint(parts))}
-                </div>
+                <fieldset class="field parts-sites">
+                    <legend class="label">Sites ∗</legend>
+                    ${siteBoxes(parts)}
+                    ${note(headerName("site_ids"), agreementHint(parts))}
+                </fieldset>
                 <div class="cols cols-2">
                     <div class="field">
                         <label for="parts-date">Trip date ∗</label>
@@ -1666,40 +1722,49 @@
             </div>`;
     }
 
-    /** Sites grouped by customer, in the pack's order. */
-    function siteOptions(parts) {
-        let html = "";
-        let customer = null;
+    /** Sites as tick boxes, grouped by customer in the pack's order. One
+        sheet is one customer's: ticking another customer's site clears the
+        ones ticked so far (see `toggleSite`) rather than refusing the tap. */
+    function siteBoxes(parts) {
+        const groups = [];
         state.pack.sites.forEach((site) => {
-            if (site.customer !== customer) {
-                if (customer !== null) html += "</optgroup>";
-                customer = site.customer;
-                html += `<optgroup label="${esc(orDash(customer))}">`;
+            const key = customerKey(site);
+            let group = groups.find((each) => each.key === key);
+            if (!group) {
+                group = { key: key, name: site.customer, sites: [] };
+                groups.push(group);
             }
-            html += `<option value="${esc(site.id)}"${String(parts.site_id) === String(site.id) ? " selected" : ""}>${esc(site.label)}</option>`;
+            group.sites.push(site);
         });
-        return customer === null ? html : `${html}</optgroup>`;
+        return groups.map((group) => {
+            const boxes = group.sites.map((site) => `<label class="field-check"><input type="checkbox" data-trip-site="${esc(site.id)}"${parts.site_ids.indexOf(String(site.id)) !== -1 ? " checked" : ""}> ${esc(orDash(site.label))}</label>`).join("");
+            return `<div class="parts-group"><div class="parts-group-head">${esc(orDash(group.name))}</div><div class="parts-units">${boxes}</div></div>`;
+        }).join("");
     }
 
     function agreementHint(parts) {
-        const site = findSite(parts.site_id);
-        if (!site) return "Only the units at the chosen site are offered below.";
+        const site = customerSite(parts);
+        if (!site) return "Tick every site of one customer this trip covered.";
         const agreement = agreementOn(site, parts.trip_date);
         const expires = agreement.expires ? `, until ${niceDate(agreement.expires)}` : "";
         const kind = asText((site.agreement || {}).kind) || AGREEMENT_NONE;
-        return `${AGREEMENT_LABEL[kind] || kind}${expires}.`;
+        return `${AGREEMENT_LABEL[kind] || kind}${expires}. One customer per sheet - ticking another customer's site clears these.`;
     }
 
+    /** The units at the ticked sites, under a heading per site. */
     function tripUnitBoxes(parts) {
         const key = headerName("units");
-        if (!parts.site_id) return `<p class="hint">Choose the site first.</p>${note(key)}`;
-        const units = siteUnits(parts.site_id);
-        if (!units.length) return `<p class="hint">The pack holds no units at this site.</p>${note(key)}`;
-        const boxes = units.map((unit) => {
-            const bq = String(unit.bq);
-            return `<label class="field-check"><input type="checkbox" data-trip-unit="${esc(bq)}"${parts.units.indexOf(bq) !== -1 ? " checked" : ""}> ${esc(unit.label || bq)}</label>`;
+        const sites = tickedSites(parts);
+        if (!sites.length) return `<p class="hint">Tick the sites first.</p>${note(key)}`;
+        const groups = sites.map((site) => {
+            const boxes = siteUnits(site.id).map((unit) => {
+                const bq = String(unit.bq);
+                return `<label class="field-check"><input type="checkbox" data-trip-unit="${esc(bq)}"${parts.units.indexOf(bq) !== -1 ? " checked" : ""}> ${esc(unit.label || bq)}</label>`;
+            }).join("");
+            const body = boxes ? `<div class="parts-units">${boxes}</div>` : `<p class="hint">The pack holds no units at this site.</p>`;
+            return `<div class="parts-group"><div class="parts-group-head">${esc(orDash(site.label))}</div>${body}</div>`;
         }).join("");
-        return `<div class="parts-units">${boxes}</div>${note(key, "Tick every unit serviced on this trip. Lines can only go into these.")}`;
+        return `${groups}${note(key, "Tick every unit serviced on this trip. Lines can only go into these.")}`;
     }
 
     function partsLinesStep(parts) {
@@ -1709,6 +1774,8 @@
         return `<div class="form-section">
                 <h3>The trip</h3>
                 <dl class="field-facts">
+                    <dt>Customer</dt><dd>${esc(orDash(asText((customerSite(parts) || {}).customer)))}</dd>
+                    <dt>Sites</dt><dd>${esc(tickedSites(parts).map((site) => orDash(site.label)).join(", "))}</dd>
                     <dt>Date</dt><dd>${esc(niceDate(parts.trip_date))}</dd>
                     <dt>Visit type</dt><dd>${esc(visitTypeLabel(parts.visit_type))}</dd>
                     <dt>Technician</dt><dd>${esc(tech ? tech.name : DASH)}</dd>
@@ -1738,7 +1805,8 @@
     }
 
     function partsRow(parts, line, index) {
-        return `<div class="parts-row${isOverruled(parts, line) ? " is-overruled" : ""}" id="parts-row-${index}">
+        const marked = line.warranty ? " is-warranty" : (isOverruled(parts, line) ? " is-overruled" : "");
+        return `<div class="parts-row${marked}" id="parts-row-${index}">
             <div class="parts-row-head">
                 <strong>${esc(KIND_LABEL[line.kind] || line.kind)}</strong>
                 <button class="btn btn-ghost" type="button" data-action="remove-row" data-row="${index}">Remove</button>
@@ -1819,13 +1887,26 @@
         refreshRow(record.parts, index);
     }
 
+    /** Focus anywhere closes every list but the one it landed in. A click on
+        an option moves focus onto it before the click arrives, so closing that
+        list too would leave the click nothing to land on (2026-10-01). Only
+        focus on the box itself opens and clears it. */
     function onFocusIn(event) {
-        const input = event.target.closest ? event.target.closest("[data-pick]") : null;
-        closePickers(input ? input.closest(".parts-pick") : null);
+        const target = event.target;
+        const picker = target.closest ? target.closest(".parts-pick") : null;
+        closePickers(picker);
+        const input = target.closest ? target.closest("[data-pick]") : null;
         if (input) {
             input.value = "";
             showPicker(input, "");
         }
+    }
+
+    /** A mouse press on an option keeps focus in the box, so the box is
+        not left and the list stays put while the click lands. */
+    function onMouseDown(event) {
+        const target = event.target;
+        if (target.closest && target.closest(".parts-pick-option")) event.preventDefault();
     }
 
     function totalHint(parts, line) {
@@ -1863,16 +1944,26 @@
         const rule = ruleFor(parts, line.kind);
         const overruled = isOverruled(parts, line);
         const option = (value, text) => `<option value="${value}"${line.invoice === value ? " selected" : ""}>${text}</option>`;
-        const why = overruled
+        let why = overruled
             ? `<strong>Overruled</strong> - the rule says ${answerLabel(rule.invoice)}: ${esc(rule.reason)}`
             : esc(rule.reason);
+        if (line.warranty) why = "Garanti - not invoiced";
         return `<div class="field">
             <label for="parts-inv-${index}">Invoice</label>
-            <select class="${inputClass(key)}${overruled ? " parts-overruled" : ""}" id="parts-inv-${index}" data-row="${index}" data-cell="invoice">
+            <select class="${inputClass(key)}${overruled ? " parts-overruled" : ""}" id="parts-inv-${index}" data-row="${index}" data-cell="invoice"${line.warranty ? " disabled" : ""}>
                 ${option("yes", "Yes")}${option("no", "No")}
             </select>
             ${state.errors[key] ? note(key) : `<div class="hint">${why}</div>`}
+            ${warrantyBox(line, index)}
         </div>`;
+    }
+
+    /** The Garanti tick under Invoice. A pack made before it has no field
+        name for it - the platform of that day would not read one - so none. */
+    function warrantyBox(line, index) {
+        const key = rowNames(index).warranty;
+        if (!key) return "";
+        return `<label class="field-check parts-warranty"><input type="checkbox" data-row="${index}" data-cell="warranty"${line.warranty ? " checked" : ""}> Garanti - covered by warranty</label>${note(key)}`;
     }
 
     function storageField(line, index) {
@@ -1909,10 +2000,13 @@
             // first and the screen is redrawn on the second.
             const key = target.getAttribute("data-head");
             editHead(record, key, target.value);
-            redraw = isChange && ["site_id", "trip_date", "visit_type"].indexOf(key) !== -1;
+            redraw = isChange && ["trip_date", "visit_type"].indexOf(key) !== -1;
+        } else if (target.hasAttribute("data-trip-site")) {
+            toggleSite(record, target.getAttribute("data-trip-site"), target.checked);
+            redraw = isChange;
         } else if (target.hasAttribute("data-trip-unit")) {
             setMember(parts.units, target.getAttribute("data-trip-unit"), target.checked);
-            parts.units = siteUnits(parts.site_id).map((unit) => String(unit.bq)).filter((bq) => parts.units.indexOf(bq) !== -1);
+            parts.units = tripUnits(parts).map((unit) => String(unit.bq)).filter((bq) => parts.units.indexOf(bq) !== -1);
         } else if (target.hasAttribute("data-unit")) {
             const line = parts.lines[Number(target.getAttribute("data-row"))];
             if (line) setMember(line.units, target.getAttribute("data-unit"), target.checked);
@@ -1932,24 +2026,47 @@
         if (!present && at !== -1) list.splice(at, 1);
     }
 
-    /** A new site starts the trip again: its units and lines belonged to the
-        old one. The date and the visit type re-apply the rule to every line
-        nobody has overruled. */
+    /** The date and the visit type re-apply the rule to every line nobody
+        has overruled. */
     function editHead(record, key, value) {
         const parts = record.parts;
-        if (key === "site_id") {
-            if (String(parts.site_id) === String(value)) return;
-            parts.site_id = value;
-            parts.units = [];
-            parts.lines = [];
-            parts.kitted = [];
-            parts.prefilled = false;
-            parts.visit_type = startingVisitType(parts);
-            record.label = siteLabel(findSite(value));
-            return;
-        }
         parts[key] = value;
         if (key === "trip_date" || key === "visit_type") applyRules(parts);
+    }
+
+    /** Tick or untick a site. A site of another customer starts the sheet
+        again - the sites, units and lines belonged to the old customer, and
+        the visit type follows the new one's agreement. Unticking a site drops
+        its units and the kit lines the app gave them; lines the technician
+        added stay, holding only units still ticked. */
+    function toggleSite(record, id, ticked) {
+        const parts = record.parts;
+        const site = findSite(id);
+        if (!site) return;
+        const key = customerKey(site);
+        const newCustomer = ticked && sheetCustomerKey(parts) !== key;
+        if (newCustomer) {
+            if (sheetCustomerKey(parts)) startAgain(parts);
+            parts.customer_key = key;
+        }
+        setMember(parts.site_ids, String(site.id), ticked);
+        parts.site_ids = tickedSites(parts).map((each) => String(each.id));
+        const here = tripUnits(parts).map((unit) => String(unit.bq));
+        parts.units = parts.units.filter((bq) => here.indexOf(bq) !== -1);
+        pruneToUnits(parts);
+        if (newCustomer) {
+            parts.visit_type = startingVisitType(parts);
+            applyRules(parts);
+        }
+        record.label = recordLabel(parts);
+    }
+
+    function startAgain(parts) {
+        parts.site_ids = [];
+        parts.units = [];
+        parts.lines = [];
+        parts.kitted = [];
+        parts.prefilled = false;
     }
 
     function editCell(parts, target, isChange) {
@@ -1958,13 +2075,30 @@
         if (!line) return;
         const cell = target.getAttribute("data-cell");
         if (cell === "invoice") {
+            if (line.warranty) return;
             line.invoice = target.value;
             line.manual = target.value !== ruleFor(parts, line.kind).invoice;
+            line.manual_invoice = line.manual ? target.value : "";
             refreshRow(parts, index);
+            return;
+        }
+        if (cell === "warranty") {
+            setWarranty(parts, index, target.checked);
             return;
         }
         line[cell] = target.value;
         if (cell === "quantity") refreshTotal(parts, index);
+    }
+
+    /** Garanti ticked: not invoiced, whatever the rule. Unticked: back to the
+        rule - or to the technician's own yes or no, if he had overruled it. */
+    function setWarranty(parts, index, ticked) {
+        const line = parts.lines[index];
+        if (!line || Boolean(line.warranty) === ticked) return;
+        line.warranty = ticked;
+        applyRule(parts, line);
+        delete state.errors[rowNames(index).warranty];
+        refreshRow(parts, index);
     }
 
     function refreshTotal(parts, index) {
@@ -2045,8 +2179,7 @@
     function tripErrors(parts) {
         const errors = {};
         const types = state.pack.billing.visit_types || {};
-        if (!parts.site_id) errors[headerName("site_id")] = "Site is required.";
-        else if (!findSite(parts.site_id)) errors[headerName("site_id")] = "That site is not in the platform. Choose one from the list.";
+        checkSites(parts, errors);
         checkTripDate(asText(parts.trip_date).trim(), errors);
         if (!parts.visit_type) errors[headerName("visit_type")] = "Visit type is required.";
         else if (!Object.prototype.hasOwnProperty.call(types, parts.visit_type)) errors[headerName("visit_type")] = "Choose a visit type from the list.";
@@ -2055,6 +2188,14 @@
         if (!parts.units.length) errors[headerName("units")] = "Tick the units serviced on this trip.";
         checkLength(headerName("notes"), asText(parts.notes).trim(), PARTS_NOTES_MAX, errors);
         return errors;
+    }
+
+    function checkSites(parts, errors) {
+        const key = headerName("site_ids");
+        const customers = tickedSites(parts).map(customerKey).filter((each, at, all) => all.indexOf(each) === at);
+        if (!parts.site_ids.length) errors[key] = "Site is required.";
+        else if (!parts.site_ids.every((id) => Boolean(findSite(id)))) errors[key] = "That site is not in the platform. Choose one from the list.";
+        else if (customers.length > 1) errors[key] = "These sites belong to different customers - make one sheet per customer.";
     }
 
     function checkTripDate(value, errors) {
@@ -2074,6 +2215,7 @@
         else if (quantityNumber(line.quantity) === null) errors[names.quantity] = "Give a quantity above zero, with at most two decimals - 1, 1.5 or 1,5.";
         if (!isTripKind(line.kind) && !lineUnits(parts, line).length) errors[names.units] = "Choose the units this went into.";
         if (line.invoice !== "yes" && line.invoice !== "no") errors[names.invoice] = "Say whether this line is invoiced - yes or no.";
+        if (line.warranty && line.invoice === "yes" && names.warranty) errors[names.warranty] = "A Garanti line is not invoiced.";
         const places = state.pack.parts.storage_locations || [];
         if (line.storage && places.indexOf(line.storage) === -1) errors[names.storage] = "Choose a storage location from the list, or leave it blank.";
     }
@@ -2111,7 +2253,7 @@
     function buildPartsReport(record) {
         const parts = record.parts;
         const sheet = state.pack.parts_sheet;
-        const head = { site_id: parts.site_id, trip_date: parts.trip_date, visit_type: parts.visit_type,
+        const head = { site_ids: parts.site_ids.join(" "), trip_date: parts.trip_date, visit_type: parts.visit_type,
             technician_id: parts.technician_id, units: parts.units.join(" "), notes: parts.notes };
         const fields = {};
         Object.keys(sheet.header).forEach((key) => { fields[asText(sheet.header[key])] = asText(head[key]).trim(); });
@@ -2124,7 +2266,7 @@
             format: REPORT_FORMAT,
             version: FORMAT_VERSION,
             kind: KIND_PARTS,
-            site_id: asText(parts.site_id),
+            customer_id: asText((customerSite(parts) || {}).customer_id),
             made_at: nowIso(),
             parts_version: asText(state.pack.parts.version),
             billing_version: asText(state.pack.billing.version),
@@ -2135,19 +2277,20 @@
 
     function rowValues(parts, line) {
         return { number: line.number, quantity: line.quantity, units: lineUnits(parts, line).join(" "),
-            invoice: line.invoice, storage: line.storage };
+            invoice: line.warranty ? "no" : line.invoice, warranty: line.warranty ? "yes" : "",
+            storage: line.storage };
     }
 
     /** The logistics sheet, frozen at Finish like the other reports. */
     function buildPartsSheet(record) {
         const parts = record.parts;
-        const site = findSite(parts.site_id) || {};
+        const site = customerSite(parts) || {};
         const tech = findTechnician(parts.technician_id) || {};
         const agreement = agreementOn(site, parts.trip_date);
         return {
             kind: KIND_PARTS,
             customer: orDash(site.customer),
-            site: orDash(site.label),
+            sites: orDash(tickedSites(parts).map((each) => asText(each.label)).join(", ")),
             trip_date: niceDate(parts.trip_date),
             visit_type: orDash(visitTypeLabel(parts.visit_type)),
             technician: orDash(asText(tech.initials) || asText(tech.name)),
@@ -2174,14 +2317,17 @@
             per_unit: trip ? DASH : quantity,
             units: trip ? "Whole trip" : lineUnits(parts, line).map(unitLabel).join(", "),
             total: totalQuantity(parts, line) || quantity,
-            invoice: answerLabel(line.invoice),
+            invoice: line.warranty ? "No – Garanti" : answerLabel(line.invoice),
             overruled: isOverruled(parts, line),
+            warranty: Boolean(line.warranty),
             storage: orDash(line.storage),
         };
     }
 
     function partsSheetMarkup(sheet) {
-        const info = [["Customer", sheet.customer], ["Site", sheet.site], ["Date", sheet.trip_date],
+        // A sheet frozen before a trip could cover several sites holds `site`.
+        const sites = sheet.sites || sheet.site;
+        const info = [["Customer", sheet.customer], ["Sites", sites], ["Date", sheet.trip_date],
             ["Visit type", sheet.visit_type], ["Technician", sheet.technician], ["Agreement", sheet.agreement]];
         const body = sheet.rows.map((row) => `<tr>
                 <td>${esc(row.kind)}</td><td class="mono">${esc(row.number)}</td><td>${esc(row.description)}</td>
@@ -2192,7 +2338,7 @@
         return `<article class="report-sheet field-sheet parts-sheet">
             <header class="report-head">
                 <span class="brand-text">BactiQuant</span>
-                <div class="title"><h1>Parts used</h1><div>${esc(sheet.site)} · ${esc(sheet.trip_date)}</div></div>
+                <div class="title"><h1>Parts used</h1><div>${esc(sheet.customer)} · ${esc(sheet.trip_date)}</div></div>
             </header>
             <section class="report-info">${info.map(([label, value]) => `<div><b>${esc(label)}</b>${esc(value)}</div>`).join("")}</section>
             <section class="report-section">
@@ -2358,6 +2504,7 @@
         app.addEventListener("change", onChange);
         app.addEventListener("submit", onSubmit);
         app.addEventListener("focusin", onFocusIn);
+        app.addEventListener("mousedown", onMouseDown);
         window.addEventListener("hashchange", onRoute);
         if (!window.location.hash) {
             window.location.replace(state.pack ? "#units" : "#pack");

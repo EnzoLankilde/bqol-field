@@ -47,6 +47,12 @@ input[type="file"].input { padding: 10px; }
 .parts-units legend { flex-basis: 100%; padding: 0; }
 .parts-row { border: 1px solid var(--color-divider); padding: var(--space-4); margin-bottom: var(--space-4); background: var(--color-surface); }
 .parts-row.is-overruled { border-left: 4px solid var(--u-warning-line); }
+.parts-row.is-warranty { border-left: 4px dotted var(--u-plan-line); }
+.parts-sites { border: 0; padding: 0; }
+.parts-sites legend { padding: 0; }
+.parts-group-head { font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-700); margin-top: var(--space-2); }
+.parts-group .parts-units { margin-bottom: var(--space-2); }
+.parts-warranty { min-height: 36px; margin-top: var(--space-2); }
 .parts-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
 .parts-overruled { background: var(--u-warning-bg); color: var(--u-warning-fg); }
 .parts-add { justify-content: flex-start; }
