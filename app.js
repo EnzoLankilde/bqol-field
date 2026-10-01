@@ -1,4 +1,4 @@
-/* BQOL Field - the offline service and installation reports for the iPad.
+/* BQOL Field - the offline service, installation and parts reports for the iPad.
    One file, no framework, no build step. It reads a field pack made on the
    platform and writes a report data file the platform imports. Every form
    field name comes from the pack; none is ever put together here, so the
@@ -16,7 +16,8 @@
     const TEXT_ANSWER = "text";
     const KIND_SERVICE = "service";
     const KIND_INSTALLATION = "installation";
-    const KIND_TITLE = { service: "Service report", installation: "Installation report" };
+    const KIND_PARTS = "parts";
+    const KIND_TITLE = { service: "Service report", installation: "Installation report", parts: "Parts used" };
     const ACTIVITY_SECTION = "activity";
     const DASH = "—";
     const BASE_KEYS = ["event_id", "event_date", "event_type", "cycle_visit",
@@ -41,6 +42,21 @@
        caught here rather than on import. */
     const INSTALL_MAX = { performed_by: 200, location: 200, customer_tag: 100,
         software_version: 50, profinet_version: 50, notes: 2000, value: 200 };
+    /* The parts list's five line kinds (parts_catalogue.LINE_KINDS), for the
+       screen's words. Which kinds are per trip comes from the pack. */
+    const LINE_VISIT = "visit";
+    const LINE_KIT = "kit";
+    const KIND_LABEL = { visit: "Visit", kit: "Kit", chemistry: "Chemistry",
+        hours: "Technician hours", part: "Spare part" };
+    const ADD_BUTTONS = [["part", "Add part"], ["hours", "Add hours"], ["chemistry", "Add chemistry"],
+        ["kit", "Add kit"], ["visit", "Add another visit"]];
+    const DEFAULT_VISIT_TYPE = "serviceaftale";
+    const AGREEMENT_NONE = "none";
+    const AGREEMENT_LABEL = { none: "No agreement", prepaid: "Prepaid agreement",
+        sla: "SLA - invoiced after each visit" };
+    // The platform's quantity rule (parts_sheet.QUANTITY_PATTERN), checked again on import.
+    const QUANTITY = /^\d{1,6}([.,]\d{1,2})?$/;
+    const PARTS_NOTES_MAX = 2000;
     const STATUS = {
         draft: { text: "Draft", badge: "badge-plan" },
         finished: { text: "Finished - not sent", badge: "badge-warning" },
@@ -105,7 +121,9 @@
     }
 
     function kindOf(record) {
-        return record && record.kind === KIND_INSTALLATION ? KIND_INSTALLATION : KIND_SERVICE;
+        if (record && record.kind === KIND_INSTALLATION) return KIND_INSTALLATION;
+        if (record && record.kind === KIND_PARTS) return KIND_PARTS;
+        return KIND_SERVICE;
     }
 
     function savePack(pack) {
@@ -347,7 +365,9 @@
     }
 
     function buildReport(record) {
-        return kindOf(record) === KIND_INSTALLATION ? buildInstallationReport(record) : buildServiceReport(record);
+        const kind = kindOf(record);
+        if (kind === KIND_PARTS) return buildPartsReport(record);
+        return kind === KIND_INSTALLATION ? buildInstallationReport(record) : buildServiceReport(record);
     }
 
     /** The installation data file. Every header and checklist field is
@@ -393,6 +413,7 @@
     /** The pack in hand can describe this record: the unit is in it, and an
         installation report also needs the pack's checklist. */
     function packCovers(record) {
+        if (kindOf(record) === KIND_PARTS) return partsCovered(record);
         if (!state.pack || !findUnit(record.bq)) return false;
         return kindOf(record) !== KIND_INSTALLATION || Boolean(installationCatalogue());
     }
@@ -621,6 +642,7 @@
                 <dt>Task catalogue</dt><dd class="mono">${esc(orDash(asText(pack.catalogue.version)))}</dd>
                 <dt>Template revision</dt><dd>${esc(orDash(asText(pack.catalogue.template_revision)))}</dd>
                 <dt>Installation checklist</dt><dd>${installationSummary()}</dd>
+                <dt>Parts list</dt><dd>${partsSummary()}</dd>
                 <dt>Reports on this iPad</dt><dd>${esc(state.reports.length)}</dd>
             </dl>` : `<p>No field pack is loaded yet.</p>`;
         return `<main class="shell shell-form">
@@ -687,6 +709,7 @@
         return `<main class="shell">
             ${banners()}
             ${pageHead(`Field pack of ${niceDate(asText(state.pack.made_on))}`, "Units", `${state.pack.units.length} units`)}
+            ${partsEntry()}
             <div class="field field-search">
                 <label for="unit-search">Search</label>
                 <input class="input" type="search" id="unit-search" value="${esc(state.unitQuery)}"
@@ -799,6 +822,7 @@
     function renderForm(id) {
         const record = findRecord(id);
         if (!record) return `<main class="shell">${pageHead("", "Report not found")}<p>This report is not on this iPad any more. <a href="#reports">Back to reports</a></p></main>`;
+        if (kindOf(record) === KIND_PARTS) return renderPartsForm(record);
         const unit = findUnit(record.bq);
         const title = KIND_TITLE[kindOf(record)];
         if (!state.pack || !unit) {
@@ -1129,8 +1153,14 @@
                 <button class="btn btn-primary" type="button" data-action="print">Print / Save as PDF</button>
             </div>
             <div class="field-bar-notes">${banners()}</div>
-            ${kindOf(record) === KIND_INSTALLATION ? installationSheetMarkup(record.sheet) : sheetMarkup(record.sheet)}
+            ${finishedMarkup(record)}
         </div>`;
+    }
+
+    function finishedMarkup(record) {
+        const kind = kindOf(record);
+        if (kind === KIND_PARTS) return partsSheetMarkup(record.sheet);
+        return kind === KIND_INSTALLATION ? installationSheetMarkup(record.sheet) : sheetMarkup(record.sheet);
     }
 
     function sheetMarkup(sheet) {
@@ -1239,8 +1269,11 @@
         </section>`;
     }
 
-    function reportFileName(report) {
+    function reportFileName(report, record) {
         const safe = (value) => asText(value).replace(/[^A-Za-z0-9._-]/g, "_");
+        if (report.kind === KIND_PARTS) {
+            return `parts-site${safe(report.site_id)}-${safe(record.parts.trip_date)}.json`;
+        }
         if (report.kind === KIND_INSTALLATION) {
             return `installation-${safe(report.bq)}-${safe(report.fields.installed_on)}.json`;
         }
@@ -1251,7 +1284,7 @@
         const record = currentRecord();
         if (!record || !record.report) return;
         const json = JSON.stringify(record.report, null, 2);
-        const name = reportFileName(record.report);
+        const name = reportFileName(record.report, record);
         const file = makeFile(json, name);
         if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
             try {
@@ -1303,9 +1336,800 @@
         if (!record) return;
         record.status = "draft";
         record.sheet = null;
+        if (kindOf(record) === KIND_PARTS) record.parts.step = "lines";
         state.errors = {};
         touch(record);
         go(`#report/${encodeURIComponent(record.id)}`);
+    }
+
+    /* ---------------------------------------------------------------- parts used
+       One sheet per trip to one site: which units were serviced, and a line
+       per billable item. The field names come from the pack's `parts_sheet`
+       (the platform's parts_sheet.py); the draft keeps plain values and
+       the report file maps them onto those names at the last moment.
+       Whether a line is invoiced is looked up in the pack's resolved billing
+       table - the rule itself is never run here. */
+
+    /** The pack's parts sheet, or null. An older pack has none, and then no
+        "Parts used" is offered - never an error. */
+    function partsPack() {
+        const pack = state.pack;
+        if (!pack || !pack.parts || !pack.billing || !pack.parts_sheet) return null;
+        const sheet = pack.parts_sheet;
+        if (!Array.isArray(pack.parts.items) || !pack.billing.table || !sheet.header
+            || !Array.isArray(sheet.lines) || !Array.isArray(pack.sites)
+            || !Array.isArray(pack.technicians)) return null;
+        return pack;
+    }
+
+    function headerName(key) {
+        return asText(state.pack.parts_sheet.header[key]);
+    }
+
+    function rowNames(index) {
+        return state.pack.parts_sheet.lines[index] || {};
+    }
+
+    function isTripKind(kind) {
+        const kinds = state.pack.parts_sheet.trip_kinds;
+        return Array.isArray(kinds) && kinds.indexOf(kind) !== -1;
+    }
+
+    function findSite(id) {
+        if (!partsPack() || !id) return null;
+        return state.pack.sites.find((site) => String(site.id) === String(id)) || null;
+    }
+
+    function findTechnician(id) {
+        if (!partsPack() || !id) return null;
+        return state.pack.technicians.find((tech) => String(tech.id) === String(id)) || null;
+    }
+
+    function findItem(number) {
+        const wanted = asText(number).trim();
+        if (!wanted || !partsPack()) return null;
+        return state.pack.parts.items.find((item) => String(item.number) === wanted) || null;
+    }
+
+    function itemsOfKind(kind) {
+        return state.pack.parts.items.filter((item) => item.kind === kind);
+    }
+
+    function siteUnits(siteId) {
+        return state.pack.units.filter((unit) => String(unit.site_id) === String(siteId));
+    }
+
+    function unitLabel(bq) {
+        const unit = findUnit(bq);
+        return unit && unit.label ? unit.label : String(bq);
+    }
+
+    function siteLabel(site) {
+        return site ? `${orDash(site.customer)} · ${orDash(site.label)}` : KIND_TITLE[KIND_PARTS];
+    }
+
+    function visitTypeLabel(key) {
+        const types = state.pack.billing.visit_types || {};
+        return asText(types[key]) || asText(key);
+    }
+
+    function partsCovered(record) {
+        if (!partsPack() || !record.parts) return false;
+        return !record.parts.site_id || Boolean(findSite(record.parts.site_id));
+    }
+
+    /** The site's agreement on the trip day. The one piece of date logic
+        the app does, and the same as billing.agreement_on: an agreement past
+        its expiry is no agreement. Everything after that is a lookup. */
+    function agreementOn(site, tripDate) {
+        const agreement = (site && site.agreement) || {};
+        const kind = asText(agreement.kind) || AGREEMENT_NONE;
+        const expires = asText(agreement.expires);
+        if (kind !== AGREEMENT_NONE && expires && isIsoDate(tripDate) && expires < tripDate) {
+            return { kind: AGREEMENT_NONE, expired: true, expires: expires };
+        }
+        return { kind: kind, expired: false, expires: expires };
+    }
+
+    /** What the pack's table says for one kind of line on this trip. A
+        missing cell - a pack whose rules could not cover it - is invoiced,
+        as the platform does: a wrong invoice is credited, a missed one is lost. */
+    function ruleFor(parts, kind) {
+        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date).kind;
+        const byType = (state.pack.billing.table[agreement] || {})[parts.visit_type] || {};
+        const cell = byType[kind];
+        if (!cell) return { invoice: "yes", reason: "No billing rule in the pack for this line - invoiced." };
+        return { invoice: cell.invoice === true ? "yes" : "no", reason: asText(cell.reason) };
+    }
+
+    /** A line nobody has overruled follows the rule; an overruled one is left alone. */
+    function applyRule(parts, line) {
+        if (!line.manual) line.invoice = ruleFor(parts, line.kind).invoice;
+    }
+
+    function applyRules(parts) {
+        parts.lines.forEach((line) => applyRule(parts, line));
+    }
+
+    function isOverruled(parts, line) {
+        return Boolean(line.invoice) && line.invoice !== ruleFor(parts, line.kind).invoice;
+    }
+
+    /** A one-unit trip puts every unit line on that unit; a trip line names none. */
+    function lineUnits(parts, line) {
+        if (isTripKind(line.kind)) return [];
+        if (parts.units.length === 1) return parts.units.slice();
+        return line.units.filter((bq) => parts.units.indexOf(bq) !== -1);
+    }
+
+    function isFilled(line) {
+        return Boolean(asText(line.number).trim() || asText(line.quantity).trim());
+    }
+
+    function quantityNumber(text) {
+        const value = asText(text).trim();
+        if (!QUANTITY.test(value)) return null;
+        const number = Number(value.replace(",", "."));
+        return number > 0 ? number : null;
+    }
+
+    /** For the screen and the logistics sheet only; the platform works the
+        stored total out again from the quantity and the units. */
+    function totalQuantity(parts, line) {
+        const number = quantityNumber(line.quantity);
+        if (number === null) return "";
+        const total = isTripKind(line.kind) ? number : number * lineUnits(parts, line).length;
+        return String(Math.round(total * 100) / 100);
+    }
+
+    function newLine(parts, kind, number, quantity, units) {
+        const line = { kind: kind, number: number || "", quantity: quantity || "",
+            units: units || [], invoice: "", manual: false, storage: "", auto: false };
+        if (!isTripKind(kind) && !line.units.length && parts.units.length === 1) line.units = parts.units.slice();
+        applyRule(parts, line);
+        return line;
+    }
+
+    function newPartsValues() {
+        const types = Object.keys(state.pack.billing.visit_types || {});
+        const techs = state.pack.technicians;
+        return {
+            step: "start",
+            site_id: "",
+            trip_date: todayIso(),
+            visit_type: types.indexOf(DEFAULT_VISIT_TYPE) !== -1 ? DEFAULT_VISIT_TYPE : (types[0] || ""),
+            technician_id: techs.length === 1 ? String(techs[0].id) : "",
+            units: [],
+            notes: "",
+            lines: [],
+            prefilled: false,
+            kitted: [],
+        };
+    }
+
+    function newParts() {
+        if (!partsPack()) return;
+        const record = {
+            id: newId(), kind: KIND_PARTS, label: KIND_TITLE[KIND_PARTS], status: "draft",
+            updated_at: nowIso(), parts: newPartsValues(), sheet: null, report: null,
+        };
+        record.report = buildPartsReport(record);
+        state.reports.push(record);
+        saveReports();
+        state.errors = {};
+        go(`#report/${encodeURIComponent(record.id)}`);
+    }
+
+    /** First time through: the visit line, and each unit's kits. Later, a
+        unit ticked since gets its kits and one unticked loses the ones it
+        was given - nothing the technician added is touched. */
+    function fitLinesToUnits(parts) {
+        parts.lines.forEach((line) => { line.units = line.units.filter((bq) => parts.units.indexOf(bq) !== -1); });
+        parts.lines = parts.lines.filter((line) => !(line.auto && !line.units.length));
+        parts.kitted = parts.kitted.filter((bq) => parts.units.indexOf(bq) !== -1);
+        if (!parts.prefilled) {
+            const first = findUnit(parts.units[0]);
+            const prefill = (first && first.parts_prefill) || {};
+            const visitItem = parts.visit_type === DEFAULT_VISIT_TYPE ? asText(prefill.visit_item) : "";
+            parts.lines.unshift(newLine(parts, LINE_VISIT, visitItem, "1", []));
+            parts.prefilled = true;
+        }
+        parts.units.forEach((bq) => {
+            if (parts.kitted.indexOf(bq) === -1) addKitLines(parts, findUnit(bq));
+        });
+    }
+
+    function addKitLines(parts, unit) {
+        if (!unit) return;
+        const prefill = unit.parts_prefill || {};
+        const kits = Array.isArray(prefill.kit_items) ? prefill.kit_items : [];
+        kits.forEach((kit) => {
+            if (!findItem(kit.number) || parts.lines.length >= state.pack.parts_sheet.lines.length) return;
+            const line = newLine(parts, LINE_KIT, asText(kit.number), asText(kit.quantity) || "1", [String(unit.bq)]);
+            line.units = [String(unit.bq)];
+            line.auto = true;
+            parts.lines.push(line);
+        });
+        parts.kitted.push(String(unit.bq));
+    }
+
+    /* -------- the screens */
+    function partsEntry() {
+        if (!partsPack()) return "";
+        const drafts = state.reports.filter((record) => kindOf(record) === KIND_PARTS && record.status === "draft").length;
+        const waiting = drafts ? `<span class="hint">${esc(drafts)} parts sheet${drafts === 1 ? "" : "s"} in progress - open ${drafts === 1 ? "it" : "them"} from <a href="#reports">Reports</a>.</span>` : "";
+        return `<div class="field-actions parts-entry">
+            ${waiting}
+            <button class="btn btn-primary" type="button" data-action="new-parts">Parts used</button>
+        </div>`;
+    }
+
+    function partsSummary() {
+        if (!partsPack()) return "Not in this pack - no parts sheet";
+        const pack = state.pack;
+        const provisional = pack.billing.confirmed ? "" : " (provisional)";
+        return `<span class="mono">${esc(orDash(asText(pack.parts.version)))}</span> · ${esc(pack.parts.items.length)} items · billing rules <span class="mono">${esc(orDash(asText(pack.billing.version)))}</span>${esc(provisional)}`;
+    }
+
+    function renderPartsForm(record) {
+        if (!partsPack()) {
+            return `<main class="shell shell-form">${pageHead(record.label, "Parts used")}<p>The loaded field pack has no parts list, so this sheet cannot be shown. Load a newer pack on the <a href="#pack">Pack</a> screen.</p></main>`;
+        }
+        if (!partsCovered(record)) {
+            return `<main class="shell shell-form">${pageHead(record.label, "Parts used")}<p>This site is not in the loaded field pack. Load the pack it came from on the <a href="#pack">Pack</a> screen.</p></main>`;
+        }
+        state.currentId = record.id;
+        const parts = record.parts;
+        const count = Object.keys(state.errors).length;
+        const body = parts.step === "lines" ? partsLinesStep(parts) : partsStartStep(parts);
+        return `<main class="shell shell-form">
+            <div class="crumb"><a href="#units">Units</a><span>${esc(record.label)} · Parts used</span></div>
+            ${banners()}
+            ${pageHead(parts.step === "lines" ? siteLabel(findSite(parts.site_id)) : "One sheet per trip to one site", "Parts used", parts.step === "lines" ? "Step 2 of 2 · Lines" : "Step 1 of 2 · The trip")}
+            ${partsNotices(parts)}
+            ${count ? `<div class="form-error-summary">Nothing was saved. Check the ${count} field${count === 1 ? "" : "s"} marked below.</div>` : ""}
+            <form id="parts-form" novalidate autocomplete="off">${body}</form>
+        </main>`;
+    }
+
+    function partsNotices(parts) {
+        let html = "";
+        if (!state.pack.billing.confirmed) {
+            html += `<p class="hint">The billing rules are provisional - the office may still change what is invoiced.</p>`;
+        }
+        const agreement = agreementOn(findSite(parts.site_id), parts.trip_date);
+        if (agreement.expired) {
+            html += `<div class="form-error-summary field-banner">The site's agreement expired on ${esc(niceDate(agreement.expires))}. This trip is treated as having no agreement - check with the office if that is wrong.</div>`;
+        }
+        return html;
+    }
+
+    function partsStartStep(parts) {
+        const types = state.pack.billing.visit_types || {};
+        const typeOptions = Object.keys(types).map((key) => `<option value="${esc(key)}"${parts.visit_type === key ? " selected" : ""}>${esc(types[key])}</option>`).join("");
+        const techOptions = state.pack.technicians.map((tech) => `<option value="${esc(tech.id)}"${String(parts.technician_id) === String(tech.id) ? " selected" : ""}>${esc(tech.name)}${tech.initials ? ` (${esc(tech.initials)})` : ""}</option>`).join("");
+        return `<div class="form-section">
+                <h3>The trip</h3>
+                <div class="field">
+                    <label for="parts-site">Site ∗</label>
+                    <select class="${inputClass(headerName("site_id"))}" id="parts-site" data-head="site_id">
+                        <option value="">Choose the site</option>${siteOptions(parts)}
+                    </select>
+                    ${note(headerName("site_id"), agreementHint(parts))}
+                </div>
+                <div class="cols cols-2">
+                    <div class="field">
+                        <label for="parts-date">Trip date ∗</label>
+                        <input class="${inputClass(headerName("trip_date"))}" type="date" id="parts-date" data-head="trip_date" value="${esc(parts.trip_date)}" max="${todayIso()}">
+                        ${note(headerName("trip_date"), "The day of the visit - it cannot be in the future.")}
+                    </div>
+                    <div class="field">
+                        <label for="parts-type">Visit type ∗</label>
+                        <select class="${inputClass(headerName("visit_type"))}" id="parts-type" data-head="visit_type">${typeOptions}</select>
+                        ${note(headerName("visit_type"), "A planned visit is always a service agreement visit, even at a site with no agreement.")}
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="parts-tech">Technician ∗</label>
+                    <select class="${inputClass(headerName("technician_id"))}" id="parts-tech" data-head="technician_id">
+                        <option value="">Choose who did the work</option>${techOptions}
+                    </select>
+                    ${note(headerName("technician_id"), "This is the signature on the sheet.")}
+                </div>
+            </div>
+            <div class="form-section">
+                <h3>Units serviced</h3>
+                ${tripUnitBoxes(parts)}
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Next: lines</button>
+                <a class="btn btn-ghost" href="#units">Back to units</a>
+                <span class="spacer label">Saved on this iPad as you type.</span>
+            </div>`;
+    }
+
+    /** Sites grouped by customer, in the pack's order. */
+    function siteOptions(parts) {
+        let html = "";
+        let customer = null;
+        state.pack.sites.forEach((site) => {
+            if (site.customer !== customer) {
+                if (customer !== null) html += "</optgroup>";
+                customer = site.customer;
+                html += `<optgroup label="${esc(orDash(customer))}">`;
+            }
+            html += `<option value="${esc(site.id)}"${String(parts.site_id) === String(site.id) ? " selected" : ""}>${esc(site.label)}</option>`;
+        });
+        return customer === null ? html : `${html}</optgroup>`;
+    }
+
+    function agreementHint(parts) {
+        const site = findSite(parts.site_id);
+        if (!site) return "Only the units at the chosen site are offered below.";
+        const agreement = agreementOn(site, parts.trip_date);
+        const expires = agreement.expires ? `, until ${niceDate(agreement.expires)}` : "";
+        const kind = asText((site.agreement || {}).kind) || AGREEMENT_NONE;
+        return `${AGREEMENT_LABEL[kind] || kind}${expires}.`;
+    }
+
+    function tripUnitBoxes(parts) {
+        const key = headerName("units");
+        if (!parts.site_id) return `<p class="hint">Choose the site first.</p>${note(key)}`;
+        const units = siteUnits(parts.site_id);
+        if (!units.length) return `<p class="hint">The pack holds no units at this site.</p>${note(key)}`;
+        const boxes = units.map((unit) => {
+            const bq = String(unit.bq);
+            return `<label class="field-check"><input type="checkbox" data-trip-unit="${esc(bq)}"${parts.units.indexOf(bq) !== -1 ? " checked" : ""}> ${esc(unit.label || bq)}</label>`;
+        }).join("");
+        return `<div class="parts-units">${boxes}</div>${note(key, "Tick every unit serviced on this trip. Lines can only go into these.")}`;
+    }
+
+    function partsLinesStep(parts) {
+        const tech = findTechnician(parts.technician_id);
+        const full = parts.lines.length >= state.pack.parts_sheet.lines.length;
+        const adds = ADD_BUTTONS.map(([kind, text]) => `<button class="btn btn-secondary" type="button" data-action="add-row" data-kind="${esc(kind)}"${full ? " disabled" : ""}>${esc(text)}</button>`).join("");
+        return `<div class="form-section">
+                <h3>The trip</h3>
+                <dl class="field-facts">
+                    <dt>Date</dt><dd>${esc(niceDate(parts.trip_date))}</dd>
+                    <dt>Visit type</dt><dd>${esc(visitTypeLabel(parts.visit_type))}</dd>
+                    <dt>Technician</dt><dd>${esc(tech ? tech.name : DASH)}</dd>
+                    <dt>Units</dt><dd>${esc(parts.units.map(unitLabel).join(", "))}</dd>
+                </dl>
+                <p><button class="btn btn-ghost" type="button" data-action="parts-start">Change the trip</button></p>
+            </div>
+            <div class="form-section">
+                <h3>Lines</h3>
+                ${partsDatalists()}
+                ${parts.lines.length ? "" : note(rowNames(0).number)}
+                <div id="parts-rows">${parts.lines.map((line, index) => partsRow(parts, line, index)).join("") || `<p class="hint">No lines yet.</p>`}</div>
+                <div class="field-actions parts-add">${adds}</div>
+                ${full ? `<p class="hint">The sheet holds ${esc(state.pack.parts_sheet.lines.length)} lines, and they are all in use.</p>` : ""}
+            </div>
+            <div class="form-section">
+                <div class="field">
+                    <label for="parts-notes">Notes</label>
+                    <textarea class="${inputClass(headerName("notes"))}" id="parts-notes" data-head="notes" rows="4">${esc(parts.notes)}</textarea>
+                    ${note(headerName("notes"), "Anything logistics needs to know.")}
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Finish</button>
+                <a class="btn btn-ghost" href="#units">Back to units</a>
+                <span class="spacer label">Saved on this iPad as you type.</span>
+            </div>`;
+    }
+
+    /** One list of items per kind, so each line offers only its own kind. */
+    function partsDatalists() {
+        return Object.keys(KIND_LABEL).map((kind) => `<datalist id="parts-choice-${esc(kind)}">${itemsOfKind(kind).map((item) => `<option value="${esc(item.number)}">${esc(item.number)} ${esc(item.description)}</option>`).join("")}</datalist>`).join("");
+    }
+
+    function partsRow(parts, line, index) {
+        return `<div class="parts-row${isOverruled(parts, line) ? " is-overruled" : ""}" id="parts-row-${index}">
+            <div class="parts-row-head">
+                <strong>${esc(KIND_LABEL[line.kind] || line.kind)}</strong>
+                <button class="btn btn-ghost" type="button" data-action="remove-row" data-row="${index}">Remove</button>
+            </div>
+            <div class="cols cols-2">${itemField(line, index)}${quantityField(parts, line, index)}</div>
+            ${isTripKind(line.kind) ? "" : unitField(parts, line, index)}
+            <div class="cols cols-2">${invoiceField(parts, line, index)}${storageField(line, index)}</div>
+        </div>`;
+    }
+
+    function itemField(line, index) {
+        const key = rowNames(index).number;
+        const item = findItem(line.number);
+        const described = item && item.kind === line.kind ? item.description : "Type the number or part of the description, then pick from the list.";
+        return `<div class="field">
+            <label for="parts-pick-${index}">Item ∗</label>
+            <input class="${inputClass(key)}" id="parts-pick-${index}" list="parts-choice-${esc(line.kind)}" value="${esc(line.number)}" data-row="${index}" data-cell="number" autocomplete="off" autocorrect="off" spellcheck="false">
+            ${note(key, described)}
+        </div>`;
+    }
+
+    function totalHint(parts, line) {
+        if (isTripKind(line.kind)) return "Once for the whole trip, however many units.";
+        const count = lineUnits(parts, line).length;
+        return `Per unit · × ${count} unit${count === 1 ? "" : "s"} = ${totalQuantity(parts, line) || DASH}`;
+    }
+
+    function quantityField(parts, line, index) {
+        const key = rowNames(index).quantity;
+        const error = state.errors[key];
+        return `<div class="field">
+            <label for="parts-qty-${index}">Quantity ∗</label>
+            <input class="${inputClass(key)}" id="parts-qty-${index}" inputmode="decimal" value="${esc(line.quantity)}" data-row="${index}" data-cell="quantity" autocomplete="off">
+            ${error ? note(key) : `<div class="hint" data-total="${index}">${esc(totalHint(parts, line))}</div>`}
+        </div>`;
+    }
+
+    function unitField(parts, line, index) {
+        const key = rowNames(index).units;
+        if (parts.units.length === 1) {
+            return `<div class="field"><span class="label">Unit</span><div>${esc(unitLabel(parts.units[0]))}</div>${note(key)}</div>`;
+        }
+        const boxes = parts.units.map((bq) => `<label class="field-check"><input type="checkbox" data-row="${index}" data-unit="${esc(bq)}"${line.units.indexOf(bq) !== -1 ? " checked" : ""}> ${esc(unitLabel(bq))}</label>`).join("");
+        return `<fieldset class="field parts-units">
+            <legend class="label">Units it went into ∗</legend>
+            ${boxes}
+            <button class="btn btn-ghost" type="button" data-action="row-all" data-row="${index}">All ${esc(parts.units.length)}</button>
+            ${note(key)}
+        </fieldset>`;
+    }
+
+    function invoiceField(parts, line, index) {
+        const key = rowNames(index).invoice;
+        const rule = ruleFor(parts, line.kind);
+        const overruled = isOverruled(parts, line);
+        const option = (value, text) => `<option value="${value}"${line.invoice === value ? " selected" : ""}>${text}</option>`;
+        const why = overruled
+            ? `<strong>Overruled</strong> - the rule says ${answerLabel(rule.invoice)}: ${esc(rule.reason)}`
+            : esc(rule.reason);
+        return `<div class="field">
+            <label for="parts-inv-${index}">Invoice</label>
+            <select class="${inputClass(key)}${overruled ? " parts-overruled" : ""}" id="parts-inv-${index}" data-row="${index}" data-cell="invoice">
+                ${option("yes", "Yes")}${option("no", "No")}
+            </select>
+            ${state.errors[key] ? note(key) : `<div class="hint">${why}</div>`}
+        </div>`;
+    }
+
+    function storageField(line, index) {
+        const key = rowNames(index).storage;
+        const places = state.pack.parts.storage_locations || [];
+        const options = places.map((place) => `<option value="${esc(place)}"${line.storage === place ? " selected" : ""}>${esc(place)}</option>`).join("");
+        return `<div class="field">
+            <label for="parts-store-${index}">Taken from</label>
+            <select class="${inputClass(key)}" id="parts-store-${index}" data-row="${index}" data-cell="storage">
+                <option value="">${DASH}</option>${options}
+            </select>
+            ${note(key)}
+        </div>`;
+    }
+
+    /* -------- editing */
+    function currentParts() {
+        const record = currentRecord();
+        return record && kindOf(record) === KIND_PARTS ? record : null;
+    }
+
+    function onPartsEdit(target, isChange) {
+        const record = currentParts();
+        if (!record) return;
+        const parts = record.parts;
+        let redraw = false;
+        if (target.hasAttribute("data-head")) {
+            // A select fires input before change, so the edit lands on the
+            // first and the screen is redrawn on the second.
+            const key = target.getAttribute("data-head");
+            editHead(record, key, target.value);
+            redraw = isChange && ["site_id", "trip_date", "visit_type"].indexOf(key) !== -1;
+        } else if (target.hasAttribute("data-trip-unit")) {
+            setMember(parts.units, target.getAttribute("data-trip-unit"), target.checked);
+            parts.units = siteUnits(parts.site_id).map((unit) => String(unit.bq)).filter((bq) => parts.units.indexOf(bq) !== -1);
+        } else if (target.hasAttribute("data-unit")) {
+            const line = parts.lines[Number(target.getAttribute("data-row"))];
+            if (line) setMember(line.units, target.getAttribute("data-unit"), target.checked);
+            refreshTotal(parts, Number(target.getAttribute("data-row")));
+        } else if (target.hasAttribute("data-cell")) {
+            editCell(parts, target, isChange);
+        } else {
+            return;
+        }
+        touch(record);
+        if (redraw) render();
+    }
+
+    function setMember(list, value, present) {
+        const at = list.indexOf(value);
+        if (present && at === -1) list.push(value);
+        if (!present && at !== -1) list.splice(at, 1);
+    }
+
+    /** A new site starts the trip again: its units and lines belonged to the
+        old one. The date and the visit type re-apply the rule to every line
+        nobody has overruled. */
+    function editHead(record, key, value) {
+        const parts = record.parts;
+        if (key === "site_id") {
+            if (String(parts.site_id) === String(value)) return;
+            parts.site_id = value;
+            parts.units = [];
+            parts.lines = [];
+            parts.kitted = [];
+            parts.prefilled = false;
+            record.label = siteLabel(findSite(value));
+            return;
+        }
+        parts[key] = value;
+        if (key === "trip_date" || key === "visit_type") applyRules(parts);
+    }
+
+    function editCell(parts, target, isChange) {
+        const index = Number(target.getAttribute("data-row"));
+        const line = parts.lines[index];
+        if (!line) return;
+        const cell = target.getAttribute("data-cell");
+        if (cell === "invoice") {
+            line.invoice = target.value;
+            line.manual = target.value !== ruleFor(parts, line.kind).invoice;
+            refreshRow(parts, index);
+            return;
+        }
+        line[cell] = target.value;
+        if (cell === "quantity") refreshTotal(parts, index);
+        if (cell === "number" && isChange) refreshRow(parts, index);
+    }
+
+    function refreshTotal(parts, index) {
+        const hint = document.querySelector(`[data-total="${index}"]`);
+        if (hint && parts.lines[index]) hint.textContent = totalHint(parts, parts.lines[index]);
+    }
+
+    function refreshRow(parts, index) {
+        const row = document.getElementById(`parts-row-${index}`);
+        if (row && parts.lines[index]) row.outerHTML = partsRow(parts, parts.lines[index], index);
+    }
+
+    function addRow(kind) {
+        const record = currentParts();
+        if (!record || !KIND_LABEL[kind]) return;
+        const parts = record.parts;
+        if (parts.lines.length >= state.pack.parts_sheet.lines.length) return;
+        parts.lines.push(newLine(parts, kind, "", kind === LINE_VISIT ? "1" : "", []));
+        touch(record);
+        render();
+        const input = document.getElementById(`parts-pick-${parts.lines.length - 1}`);
+        if (input) {
+            input.scrollIntoView({ block: "center" });
+            input.focus();
+        }
+    }
+
+    /** Removing a line moves every line after it up a row, so the messages
+        about rows no longer fit and are cleared. */
+    function removeRow(index) {
+        const record = currentParts();
+        if (!record || !record.parts.lines[index]) return;
+        record.parts.lines.splice(index, 1);
+        state.errors = {};
+        touch(record);
+        render();
+    }
+
+    function allUnits(index) {
+        const record = currentParts();
+        const line = record ? record.parts.lines[index] : null;
+        if (!line) return;
+        line.units = record.parts.units.slice();
+        touch(record);
+        refreshRow(record.parts, index);
+    }
+
+    function toStart() {
+        const record = currentParts();
+        if (!record) return;
+        record.parts.step = "start";
+        state.errors = {};
+        touch(record);
+        render();
+        window.scrollTo(0, 0);
+    }
+
+    function toLines() {
+        const record = currentParts();
+        if (!record) return;
+        state.errors = tripErrors(record.parts);
+        if (!Object.keys(state.errors).length) {
+            fitLinesToUnits(record.parts);
+            record.parts.step = "lines";
+        }
+        touch(record);
+        render();
+        window.scrollTo(0, 0);
+    }
+
+    function submitParts() {
+        const record = currentParts();
+        if (record && record.parts.step === "lines") finishParts();
+        else toLines();
+    }
+
+    /* -------- validation: the platform's messages, word for word */
+    function tripErrors(parts) {
+        const errors = {};
+        const types = state.pack.billing.visit_types || {};
+        if (!parts.site_id) errors[headerName("site_id")] = "Site is required.";
+        else if (!findSite(parts.site_id)) errors[headerName("site_id")] = "That site is not in the platform. Choose one from the list.";
+        checkTripDate(asText(parts.trip_date).trim(), errors);
+        if (!parts.visit_type) errors[headerName("visit_type")] = "Visit type is required.";
+        else if (!Object.prototype.hasOwnProperty.call(types, parts.visit_type)) errors[headerName("visit_type")] = "Choose a visit type from the list.";
+        if (!parts.technician_id) errors[headerName("technician_id")] = "Technician is required.";
+        else if (!findTechnician(parts.technician_id)) errors[headerName("technician_id")] = "That technician is not in the platform. Choose one from the list.";
+        if (!parts.units.length) errors[headerName("units")] = "Tick the units serviced on this trip.";
+        checkLength(headerName("notes"), asText(parts.notes).trim(), PARTS_NOTES_MAX, errors);
+        return errors;
+    }
+
+    function checkTripDate(value, errors) {
+        const key = headerName("trip_date");
+        if (!value) errors[key] = "Trip date is required.";
+        else if (!isIsoDate(value)) errors[key] = "Use the date format YYYY-MM-DD, or leave it blank.";
+        else if (value > todayIso()) errors[key] = "Parts cannot be used on a trip that has not happened yet.";
+    }
+
+    function lineErrors(parts, line, index, errors) {
+        const names = rowNames(index);
+        const item = findItem(line.number);
+        if (!asText(line.number).trim()) errors[names.number] = "Choose an item, or clear this row.";
+        else if (!item) errors[names.number] = "That item is not in the parts list. Choose one from the list.";
+        else if (item.kind !== line.kind) errors[names.number] = `That is not a ${asText(KIND_LABEL[line.kind]).toLowerCase()} item. Choose one from this line's list.`;
+        if (!asText(line.quantity).trim()) errors[names.quantity] = "Quantity is required.";
+        else if (quantityNumber(line.quantity) === null) errors[names.quantity] = "Give a quantity above zero, with at most two decimals - 1, 1.5 or 1,5.";
+        if (!isTripKind(line.kind) && !lineUnits(parts, line).length) errors[names.units] = "Choose the units this went into.";
+        if (line.invoice !== "yes" && line.invoice !== "no") errors[names.invoice] = "Say whether this line is invoiced - yes or no.";
+        const places = state.pack.parts.storage_locations || [];
+        if (line.storage && places.indexOf(line.storage) === -1) errors[names.storage] = "Choose a storage location from the list, or leave it blank.";
+    }
+
+    function validateParts(parts) {
+        const errors = tripErrors(parts);
+        const filled = parts.lines.filter(isFilled);
+        parts.lines.forEach((line, index) => { if (isFilled(line)) lineErrors(parts, line, index, errors); });
+        if (!filled.length) errors[rowNames(0).number] = "Add at least one line - the visit, at least.";
+        return errors;
+    }
+
+    function finishParts() {
+        const record = currentParts();
+        if (!record || !packCovers(record)) return;
+        const parts = record.parts;
+        state.errors = validateParts(parts);
+        if (Object.keys(state.errors).length) {
+            if (Object.keys(tripErrors(parts)).length) parts.step = "start";
+            touch(record);
+            render();
+            return;
+        }
+        record.status = "finished";
+        record.sheet = buildPartsSheet(record);
+        touch(record);
+        go(`#finished/${encodeURIComponent(record.id)}`);
+    }
+
+    /* -------- the outputs */
+
+    /** The report data file: every header field and every one of the pack's
+        rows present, blank or not, and every value a string. A line's units
+        are the BQ serials, space-separated - a serial never holds a space. */
+    function buildPartsReport(record) {
+        const parts = record.parts;
+        const sheet = state.pack.parts_sheet;
+        const head = { site_id: parts.site_id, trip_date: parts.trip_date, visit_type: parts.visit_type,
+            technician_id: parts.technician_id, units: parts.units.join(" "), notes: parts.notes };
+        const fields = {};
+        Object.keys(sheet.header).forEach((key) => { fields[asText(sheet.header[key])] = asText(head[key]).trim(); });
+        sheet.lines.forEach((names, index) => {
+            const line = parts.lines[index];
+            const values = line && isFilled(line) ? rowValues(parts, line) : {};
+            Object.keys(names).forEach((part) => { fields[asText(names[part])] = asText(values[part]).trim(); });
+        });
+        return {
+            format: REPORT_FORMAT,
+            version: FORMAT_VERSION,
+            kind: KIND_PARTS,
+            site_id: asText(parts.site_id),
+            made_at: nowIso(),
+            parts_version: asText(state.pack.parts.version),
+            billing_version: asText(state.pack.billing.version),
+            pack_made_on: asText(state.pack.made_on),
+            fields: fields,
+        };
+    }
+
+    function rowValues(parts, line) {
+        return { number: line.number, quantity: line.quantity, units: lineUnits(parts, line).join(" "),
+            invoice: line.invoice, storage: line.storage };
+    }
+
+    /** The logistics sheet, frozen at Finish like the other reports. */
+    function buildPartsSheet(record) {
+        const parts = record.parts;
+        const site = findSite(parts.site_id) || {};
+        const tech = findTechnician(parts.technician_id) || {};
+        const agreement = agreementOn(site, parts.trip_date);
+        return {
+            kind: KIND_PARTS,
+            customer: orDash(site.customer),
+            site: orDash(site.label),
+            trip_date: niceDate(parts.trip_date),
+            visit_type: orDash(visitTypeLabel(parts.visit_type)),
+            technician: orDash(asText(tech.initials) || asText(tech.name)),
+            agreement: agreement.expired
+                ? `Expired ${niceDate(agreement.expires)} - none`
+                : (AGREEMENT_LABEL[agreement.kind] || agreement.kind),
+            units: parts.units.map(unitLabel),
+            rows: parts.lines.filter(isFilled).map((line) => sheetRow(parts, line)),
+            notes: asText(parts.notes).split(/\r?\n/).map((text) => text.trim()).filter(Boolean),
+            billing_version: orDash(asText(state.pack.billing.version)),
+            parts_version: orDash(asText(state.pack.parts.version)),
+            provisional: !state.pack.billing.confirmed,
+        };
+    }
+
+    function sheetRow(parts, line) {
+        const item = findItem(line.number) || {};
+        const trip = isTripKind(line.kind);
+        const quantity = asText(line.quantity).trim().replace(",", ".");
+        return {
+            kind: KIND_LABEL[line.kind] || line.kind,
+            number: asText(line.number).trim(),
+            description: orDash(item.description),
+            per_unit: trip ? DASH : quantity,
+            units: trip ? "Whole trip" : lineUnits(parts, line).map(unitLabel).join(", "),
+            total: totalQuantity(parts, line) || quantity,
+            invoice: answerLabel(line.invoice),
+            overruled: isOverruled(parts, line),
+            storage: orDash(line.storage),
+        };
+    }
+
+    function partsSheetMarkup(sheet) {
+        const info = [["Customer", sheet.customer], ["Site", sheet.site], ["Date", sheet.trip_date],
+            ["Visit type", sheet.visit_type], ["Technician", sheet.technician], ["Agreement", sheet.agreement]];
+        const body = sheet.rows.map((row) => `<tr>
+                <td>${esc(row.kind)}</td><td class="mono">${esc(row.number)}</td><td>${esc(row.description)}</td>
+                <td class="num">${esc(row.per_unit)}</td><td>${esc(row.units)}</td><td class="num"><strong>${esc(row.total)}</strong></td>
+                <td class="result">${esc(row.invoice)}${row.overruled ? " ∗" : ""}</td><td>${esc(row.storage)}</td>
+            </tr>`).join("");
+        const overruled = sheet.rows.some((row) => row.overruled);
+        return `<article class="report-sheet field-sheet parts-sheet">
+            <header class="report-head">
+                <span class="brand-text">BactiQuant</span>
+                <div class="title"><h1>Parts used</h1><div>${esc(sheet.site)} · ${esc(sheet.trip_date)}</div></div>
+            </header>
+            <section class="report-info">${info.map(([label, value]) => `<div><b>${esc(label)}</b>${esc(value)}</div>`).join("")}</section>
+            <section class="report-section">
+                <h2>Units serviced (${esc(sheet.units.length)})</h2>
+                <p>${esc(sheet.units.join(", "))}</p>
+            </section>
+            <section class="report-section">
+                <h2>Lines</h2>
+                <table class="report-table">
+                    <thead><tr><th>Type</th><th>Item no.</th><th>Description</th><th>Qty per unit</th><th>Units</th><th>Total</th><th>Invoice</th><th>Storage</th></tr></thead>
+                    <tbody>${body}</tbody>
+                </table>
+                ${overruled ? `<p class="parts-foot">∗ Overruled by the technician - the billing rule said otherwise.</p>` : ""}
+            </section>
+            <section class="report-section">
+                <h2>Notes</h2>
+                ${sheet.notes.length ? sheet.notes.map((text) => `<p>${esc(text)}</p>`).join("") : "<p>None.</p>"}
+            </section>
+            <footer class="report-foot">
+                <span>Billing rules ${esc(sheet.billing_version)}${sheet.provisional ? " (provisional)" : ""} · parts list ${esc(sheet.parts_version)}</span>
+            </footer>
+        </article>`;
     }
 
     /* ---------------------------------------------------------------- Reports screen */
@@ -1313,7 +2137,7 @@
         const records = state.reports.slice().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
         const body = records.length
             ? `<div class="table-wrap"><table class="table responsive field-reports">
-                <thead><tr><th>Unit</th><th>Report</th><th>Date</th><th>Status</th><th>Last changed</th><th></th></tr></thead>
+                <thead><tr><th>Unit or site</th><th>Report</th><th>Date</th><th>Status</th><th>Last changed</th><th></th></tr></thead>
                 <tbody>${records.map(reportRow).join("")}</tbody>
             </table></div>`
             : `<p>No reports on this iPad yet. Start one from <a href="#units">Units</a>.</p>`;
@@ -1327,13 +2151,14 @@
     function reportRow(record) {
         const kind = kindOf(record);
         const dateKey = kind === KIND_INSTALLATION ? "installed_on" : "event_date";
-        const date = record.values ? niceDate(asText(record.values[dateKey])) : DASH;
+        let date = record.values ? niceDate(asText(record.values[dateKey])) : DASH;
+        if (kind === KIND_PARTS) date = record.parts ? niceDate(asText(record.parts.trip_date)) : DASH;
         const id = esc(record.id);
         const actions = state.confirmDelete === record.id ? deleteConfirm(record) : `
             <button class="btn btn-secondary" type="button" data-action="open-report" data-id="${id}">Open</button>
             <button class="btn btn-ghost" type="button" data-action="ask-delete" data-id="${id}">Delete</button>`;
         return `<tr>
-            <td data-th="Unit"><strong>${esc(record.label)}</strong></td>
+            <td data-th="Unit or site"><strong>${esc(record.label)}</strong></td>
             <td data-th="Report">${esc(KIND_TITLE[kind])}</td>
             <td data-th="Date">${esc(date)}</td>
             <td data-th="Status">${badge(record.status)}</td>
@@ -1377,6 +2202,11 @@
         "save-file": () => { saveDataFile(); },
         "mark-sent": markSent,
         "edit": editRecord,
+        "new-parts": newParts,
+        "parts-start": toStart,
+        "add-row": (el) => addRow(el.getAttribute("data-kind")),
+        "remove-row": (el) => removeRow(Number(el.getAttribute("data-row"))),
+        "row-all": (el) => allUnits(Number(el.getAttribute("data-row"))),
     };
 
     function onClick(event) {
@@ -1396,6 +2226,8 @@
             applyUnitFilter();
         } else if (target.closest("#report-form")) {
             onFormEdit(target, false);
+        } else if (target.closest("#parts-form")) {
+            onPartsEdit(target, false);
         }
     }
 
@@ -1405,10 +2237,17 @@
             if (target.files && target.files[0]) readPackFile(target.files[0]);
         } else if (target.closest("#report-form")) {
             onFormEdit(target, true);
+        } else if (target.closest("#parts-form")) {
+            onPartsEdit(target, true);
         }
     }
 
     function onSubmit(event) {
+        if (event.target.id === "parts-form") {
+            event.preventDefault();
+            submitParts();
+            return;
+        }
         if (event.target.id !== "report-form") return;
         event.preventDefault();
         finish();

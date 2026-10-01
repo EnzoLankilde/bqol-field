@@ -41,6 +41,18 @@ input[type="file"].input { padding: 10px; }
 .field-banner { font-size: 14px; }
 .field-empty { border: 1px solid var(--color-divider); padding: var(--space-6); }
 
+/* Parts used: one card per line, so a line reads top to bottom on an upright iPad. */
+.parts-entry { margin-bottom: var(--space-6); }
+.parts-units { display: flex; flex-wrap: wrap; gap: 0 var(--space-6); border: 0; padding: 0; margin: 0 0 var(--space-4); }
+.parts-units legend { flex-basis: 100%; padding: 0; }
+.parts-row { border: 1px solid var(--color-divider); padding: var(--space-4); margin-bottom: var(--space-4); background: var(--color-surface); }
+.parts-row.is-overruled { border-left: 4px solid var(--u-warning-line); }
+.parts-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.parts-overruled { background: var(--u-warning-bg); color: var(--u-warning-fg); }
+.parts-add { justify-content: flex-start; }
+.parts-sheet .num { text-align: right; white-space: nowrap; }
+.parts-sheet .parts-foot { font-size: 8.5pt; margin-top: 4px; }
+
 .field-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-6); margin: 0; }
 .field-facts dt { font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-neutral-700); align-self: center; }
 .field-facts dd { margin: 0; }

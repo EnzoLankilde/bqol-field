@@ -1,7 +1,7 @@
 # BQOL Field
 
-An offline web app for the iPad. A technician fills in a service report or an
-installation report on site, with no connection, and the platform imports the result.
+An offline web app for the iPad. A technician fills in a service report, an
+installation report or a parts sheet on site, with no connection, and the platform imports the result.
 
 1. On the platform, make a **field pack** and email it to the technician.
 2. On the iPad, open BQOL Field, go to **Pack** and load the file.
@@ -15,6 +15,7 @@ installation report on site, with no connection, and the platform imports the re
    - **Installation report** - only on units the pack marks as due one. A unit has one
      installation report, so once it exists on the iPad the button opens that one
      (**Resume installation** while it is a draft).
+   Above the list, **Parts used** starts a parts sheet for a trip to one site (see below).
 4. Press **Finish**. The A4 report appears: **Print / Save as PDF** uses Safari's own print,
    and **Save data file** shares or downloads the report data file.
 5. Send the data file to the office, import it on the platform, and **Mark as sent**.
@@ -107,6 +108,58 @@ Every header field and every checklist field is present, and every value is a st
 is no `deviation_found`. The app checks what the platform checks: an installation date
 (not in the future), who installed it, and yes/no/blank for each activity.
 
+### Parts used
+
+A pack from a platform that has the parts list also carries `parts`, `billing`,
+`parts_sheet`, `sites` and `technicians`, and each unit gains `site_id` and
+`parts_prefill`. A pack without them (an older one) offers no **Parts used**.
+
+```json
+{
+  "parts": {"version": "...", "items": [{"number": "90001", "description": "...", "kind": "visit"}],
+            "storage_locations": ["..."], "problems": []},
+  "billing": {"version": "...", "confirmed": false, "ok": true,
+              "visit_types": {"serviceaftale": "...", "tilkaldt": "...", "garanti": "..."},
+              "table": {"<agreement>": {"<visit type>": {"<line kind>": {"invoice": true, "reason": "..."}}}}},
+  "parts_sheet": {"header": {"site_id": "...", "trip_date": "...", "visit_type": "...",
+                             "technician_id": "...", "units": "...", "notes": "..."},
+                  "lines": [{"number": "...", "quantity": "...", "units": "...", "invoice": "...", "storage": "..."}],
+                  "trip_kinds": ["visit", "hours"], "unit_kinds": ["kit", "chemistry", "part"]},
+  "sites": [{"id": 1, "customer": "...", "label": "...", "agreement": {"kind": "none", "expires": ""}}],
+  "technicians": [{"id": 1, "name": "...", "initials": "..."}]
+}
+```
+
+Per unit: `"parts_prefill": {"visit_item": "90001", "kit_items": [{"number": "90021", "quantity": "1"}]}`,
+worked out on the platform from the unit's next cycle visit.
+
+The app never works out who pays. Each line's invoice yes/no starts from
+`billing.table[agreement][visit_type][line kind]`; the only date logic is that an agreement
+whose `expires` is before the trip date counts as `none`, with a warning. The technician can
+overrule a line; the platform decides on import whether the posted answer differs from the rule.
+A trip line (`trip_kinds`) names no units and its quantity is for the whole trip; a unit line
+names the units it went into, from the trip's ticked units only, and its quantity is per unit.
+On a one-unit trip every unit line is on that unit.
+
+Saved as `parts-site<site id>-<trip date>.json`:
+
+```json
+{
+  "format": "bqol-field-report", "version": 1, "kind": "parts", "site_id": "1",
+  "made_at": "2026-10-02T14:03:00", "parts_version": "...", "billing_version": "...",
+  "pack_made_on": "2026-09-30",
+  "fields": {"site_id": "1", "trip_date": "2026-10-02", "visit_type": "serviceaftale",
+             "technician_id": "1", "units": "900 901", "notes": "",
+             "<lines[0].number>": "90001", "<lines[0].quantity>": "1", "<lines[0].units>": "",
+             "<lines[0].invoice>": "no", "<lines[0].storage>": "", "...": "..."}
+}
+```
+
+Every header field and every row of `parts_sheet.lines` is present, blank or not, and every
+value is a string. A row with no item and no quantity is empty. Units are BQ serials separated
+by a space. Its A4 sheet is the logistics sheet: every line with its quantity per unit, the
+units, the total, invoice Yes/No (marked when overruled) and where it was taken from.
+
 ## Trying it locally
 
 ```powershell
@@ -121,6 +174,6 @@ opening `index.html` straight from disk works but does not install offline suppo
 
 The pack and the reports live in the browser's local storage on that iPad
 (`bqolField.pack`, `bqolField.reports`). Each report record carries a `kind` -
-`service` or `installation`; a record saved before installation reports existed has none,
+`service`, `installation` or `parts`; a record saved before installation reports existed has none,
 and is read as a service report. If storage is blocked the app still works, keeps
 everything in the open tab only, and says so on every screen.
