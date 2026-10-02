@@ -3,7 +3,7 @@
    placeholder, so every new build gets a fresh cache and the old one goes. */
 "use strict";
 
-const CACHE_NAME = "bqol-field-93eb62874b89";
+const CACHE_NAME = "bqol-field-7ce68834a95c";
 const SHELL = [
     "./",
     "index.html",

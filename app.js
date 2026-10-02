@@ -1966,14 +1966,24 @@
         return `<label class="field-check parts-warranty"><input type="checkbox" data-row="${index}" data-cell="warranty"${line.warranty ? " checked" : ""}> Garanti - covered by warranty</label>${note(key)}`;
     }
 
+    /** The pack's "No storage" answer, or null from a pack made before it was asked. */
+    function noStorage() {
+        return state.pack.parts.no_storage || null;
+    }
+
+    /** Where a unit line was taken from must be answered; a trip line has no box.
+        "No storage" sits last, so the real locations are read past first. */
     function storageField(line, index) {
+        if (isTripKind(line.kind)) return "";
         const key = rowNames(index).storage;
         const places = state.pack.parts.storage_locations || [];
-        const options = places.map((place) => `<option value="${esc(place)}"${line.storage === place ? " selected" : ""}>${esc(place)}</option>`).join("");
+        const none = noStorage();
+        const option = (value, text) => `<option value="${esc(value)}"${line.storage === value ? " selected" : ""}>${esc(text)}</option>`;
+        const options = places.map((place) => option(place, place)).join("") + (none ? option(none.value, none.label) : "");
         return `<div class="field">
             <label for="parts-store-${index}">Taken from</label>
             <select class="${inputClass(key)}" id="parts-store-${index}" data-row="${index}" data-cell="storage">
-                <option value="">${DASH}</option>${options}
+                <option value="">${none ? "Choose…" : DASH}</option>${options}
             </select>
             ${note(key)}
         </div>`;
@@ -2216,8 +2226,11 @@
         if (!isTripKind(line.kind) && !lineUnits(parts, line).length) errors[names.units] = "Choose the units this went into.";
         if (line.invoice !== "yes" && line.invoice !== "no") errors[names.invoice] = "Say whether this line is invoiced - yes or no.";
         if (line.warranty && line.invoice === "yes" && names.warranty) errors[names.warranty] = "A Garanti line is not invoiced.";
+        if (isTripKind(line.kind)) return;
         const places = state.pack.parts.storage_locations || [];
-        if (line.storage && places.indexOf(line.storage) === -1) errors[names.storage] = "Choose a storage location from the list, or leave it blank.";
+        const none = noStorage();
+        if (none && !line.storage) errors[names.storage] = `Choose where it was taken from, or ${none.label}.`;
+        else if (line.storage && places.indexOf(line.storage) === -1 && !(none && line.storage === none.value)) errors[names.storage] = "Choose a storage location from the list.";
     }
 
     function validateParts(parts) {
@@ -2278,7 +2291,14 @@
     function rowValues(parts, line) {
         return { number: line.number, quantity: line.quantity, units: lineUnits(parts, line).join(" "),
             invoice: line.warranty ? "no" : line.invoice, warranty: line.warranty ? "yes" : "",
-            storage: line.storage };
+            storage: isTripKind(line.kind) ? "" : line.storage };
+    }
+
+    /** Where a line came from, in words - the platform's `storage_text`. */
+    function storageText(line) {
+        if (isTripKind(line.kind)) return DASH;
+        const none = noStorage();
+        return none && line.storage === none.value ? none.label : orDash(line.storage);
     }
 
     /** The logistics sheet, frozen at Finish like the other reports. */
@@ -2320,7 +2340,7 @@
             invoice: line.warranty ? "No – Garanti" : answerLabel(line.invoice),
             overruled: isOverruled(parts, line),
             warranty: Boolean(line.warranty),
-            storage: orDash(line.storage),
+            storage: storageText(line),
         };
     }
 
